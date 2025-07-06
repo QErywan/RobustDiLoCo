@@ -1,0 +1,45 @@
+name: adam_sweep
+project:  SparseLoCo-512M
+method: grid
+program: train.py
+command:
+  - /usr/bin/env
+  - torchrun
+  - --nproc_per_node=8
+  - ${program} 
+  - ${args_no_boolean_flags}
+
+parameters:
+  # Run configuration
+  strategy:
+    value: adam_baseline
+  run_name:
+    value: AdamW_baseline
+
+  # Data configuration
+  shards_path:
+    value: $DATA_DIR/dclm_tokenized
+  token_budget:
+    value: 10255073280 # [effective_bs=2**22 * iterations=2445]
+  sequence_length:
+    value: 2048
+
+  # Model configuration
+  hparams_file:
+    value: hparams/512M/512M_model_hparams.json
+  use_compile:
+    value: True
+
+  # Training configuration
+  micro_batch_size:
+    value: 8 # -1 to set micro_batch_size to batch_size
+  batch_size:
+    values: 
+    - 256
+  outer_learning_rate:
+    values:
+    - 3e-3
+  warmup_steps:
+    value: 500
+  weight_decay:
+    value: 0.1
