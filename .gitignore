@@ -41,6 +41,9 @@ uv.lock
 *.swo
 .DS_Store
 
+# Claude Code
+CLAUDE.md
+
 # Project specific
 wandb
 *ipynb
