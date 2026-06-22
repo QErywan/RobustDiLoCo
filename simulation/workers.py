@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 from torch.optim import AdamW, SGD
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 
 @dataclass
@@ -111,7 +112,7 @@ class Worker:
         self.model.train()
         losses = []
 
-        for _ in range(steps):
+        for _ in tqdm(range(steps), desc=f"Worker {self.rank}", leave=False):
             batch = self._next_batch()
             input_ids = batch.to(self.device)
             labels = input_ids.clone()

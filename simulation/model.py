@@ -1,9 +1,11 @@
 """
 Model factory for the simulation layer.
 
-Wraps LlamaForCausalLM with the same hparams format used by the upstream
-train.py (tokenizer_name is popped; all remaining keys go to LlamaConfig).
-The returned model satisfies the interface expected by simulation/workers.py:
+Supports two architecture families, selected via "model_type" in the hparams JSON:
+  - "llama"  (default): LlamaForCausalLM — upstream SparseLoCo architecture
+  - "gpt2":             GPT2LMHeadModel  — NanoGPT-style as cited in the interim report
+
+Both satisfy the interface expected by simulation/workers.py:
     outputs = model(input_ids=..., labels=...)
     loss = outputs.loss
 """
@@ -13,23 +15,34 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
-from transformers import LlamaConfig, LlamaForCausalLM
+from transformers import (
+    GPT2Config, GPT2LMHeadModel,
+    LlamaConfig, LlamaForCausalLM,
+)
 
 
 def build_model(hparams_path: str | Path, device: str | torch.device = "cpu") -> nn.Module:
     """
-    Instantiate a LlamaForCausalLM from a simulation hparams JSON.
+    Instantiate a model from a simulation hparams JSON.
 
-    The JSON must contain 'vocab_size'. 'tokenizer_name' is ignored (present
-    for compatibility with the upstream format but not used here — the
-    simulation handles tokenisation separately).
+    The JSON may contain:
+      - "model_type": "gpt2" | "llama" (default: "llama")
+      - "tokenizer_name": ignored (stripped before passing to config)
+      - all other keys forwarded to the corresponding HuggingFace config
     """
     with open(hparams_path) as f:
         hparams = json.load(f)
 
     hparams.pop("tokenizer_name", None)
-    config = LlamaConfig(**hparams)
-    model = LlamaForCausalLM(config)
+    model_type = hparams.pop("model_type", "llama")
+
+    if model_type == "gpt2":
+        config = GPT2Config(**hparams)
+        model = GPT2LMHeadModel(config)
+    else:
+        config = LlamaConfig(**hparams)
+        model = LlamaForCausalLM(config)
+
     return model.to(device)
 
 

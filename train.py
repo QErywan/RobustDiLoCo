@@ -140,6 +140,11 @@ class DistributedLLMTrainer:
         )
         parser.add_argument("--run_name", type=str, default="", help="Wandb run name.")
         parser.add_argument(
+            "--no_wandb",
+            action="store_true",
+            help="Disable W&B logging (useful for local simulation runs).",
+        )
+        parser.add_argument(
             "--device", type=str, default="cuda", help="Device to use for training"
         )
         parser.add_argument("--debug", action="store_true", help="Enable debug logging")
@@ -320,6 +325,11 @@ class DistributedLLMTrainer:
         )
         parser.add_argument(
             "--data_in_gpu", action="store_true", help="Keep whole dataset in GPU."
+        )
+        parser.add_argument(
+            "--synthetic_data",
+            action="store_true",
+            help="Use randomly generated token sequences instead of real shards (no files needed).",
         )
 
         # Checkpoint args
@@ -526,17 +536,26 @@ class DistributedLLMTrainer:
         Timer.disable(not (self.config.debug and self.global_rank == 0))
 
         if self.world_size > 1:
-            torch.cuda.set_device(self.local_rank)
+            num_gpus = torch.cuda.device_count()
+            if num_gpus >= self.world_size:
+                backend = "nccl"
+                torch.cuda.set_device(self.local_rank)
+            else:
+                backend = "gloo"
             init_process_group(
-                backend="nccl", rank=self.global_rank, world_size=self.world_size
+                backend=backend, rank=self.global_rank, world_size=self.world_size
             )
             tplr.logger.info(
-                f"Initialized DDP: rank {self.global_rank}/{self.world_size - 1} on device {self.local_rank}"
+                f"Initialized DDP: rank {self.global_rank}/{self.world_size - 1} on device {self.local_rank} (backend={backend})"
             )
 
-        self.device = torch.device(
-            f"cuda:{self.local_rank}" if torch.cuda.is_available() else "cpu"
-        )
+        num_gpus = torch.cuda.device_count()
+        if num_gpus >= self.world_size:
+            self.device = torch.device(f"cuda:{self.local_rank}")
+        elif num_gpus > 0:
+            self.device = torch.device("cuda:0")
+        else:
+            self.device = torch.device("cpu")
 
     def _calculate_steps(self):
         """Calculate training steps."""
@@ -592,45 +611,64 @@ class DistributedLLMTrainer:
             self.model = torch.compile(self.model, dynamic=True)
 
         if self.world_size > 1:
-            self.model = DDP(
-                self.model,
-                device_ids=[self.local_rank],
-                output_device=self.local_rank,
-                find_unused_parameters=False,
-            )
+            if self.device.type == "cpu":
+                self.model = DDP(self.model, find_unused_parameters=False)
+            else:
+                self.model = DDP(
+                    self.model,
+                    device_ids=[self.local_rank],
+                    output_device=self.local_rank,
+                    find_unused_parameters=False,
+                )
 
     def _initialize_dataloader(self):
         """Initialize the data loader."""
-        if self.global_rank == 0:
-            # Log memory before dataset creation
-            ram_before = psutil.virtual_memory()
-            tplr.logger.info(
-                f"RAM before dataset creation: {ram_before.used / 1024**3:.2f}GB used, "
-                f"{ram_before.available / 1024**3:.2f}GB available"
+        if self.config.synthetic_data:
+            vocab_size = self.tokenizer.vocab_size
+            num_samples = (
+                self.config.token_budget
+                // self.world_size
+                // self.config.sequence_length
+            )
+            train_dataset = tplr.SyntheticDataset(
+                vocab_size=vocab_size,
+                sequence_length=self.config.sequence_length,
+                num_samples=num_samples,
+            )
+            if self.global_rank == 0:
+                tplr.logger.info(
+                    f"Using synthetic data: {num_samples} random sequences of length {self.config.sequence_length}"
+                )
+        else:
+            if self.global_rank == 0:
+                ram_before = psutil.virtual_memory()
+                tplr.logger.info(
+                    f"RAM before dataset creation: {ram_before.used / 1024**3:.2f}GB used, "
+                    f"{ram_before.available / 1024**3:.2f}GB available"
+                )
+
+            train_dataset = tplr.ShadedDataset(
+                shards_path=os.path.expandvars(os.path.expanduser(self.config.shards_path)),
+                token_budget=self.config.token_budget,
+                sequence_length=self.config.sequence_length,
+                rank=self.global_rank,
+                world_size=self.world_size,
+                device=self.device,
+                shard_token_size=self.config.shard_token_size,
+                split="train",
+                pin_to_gpu=self.config.data_in_gpu,
             )
 
-        train_dataset = tplr.ShadedDataset(
-            shards_path=os.path.expandvars(os.path.expanduser(self.config.shards_path)),
-            token_budget=self.config.token_budget,
-            sequence_length=self.config.sequence_length,
-            rank=self.global_rank,
-            world_size=self.world_size,
-            device=self.device,
-            shard_token_size=self.config.shard_token_size,
-            split="train",
-            pin_to_gpu=self.config.data_in_gpu,
-        )
+            if self.global_rank == 0:
+                ram_after = psutil.virtual_memory()
+                tplr.logger.info(
+                    f"RAM after dataset creation: {ram_after.used / 1024**3:.2f}GB used, "
+                    f"{ram_after.available / 1024**3:.2f}GB available"
+                )
 
         self.train_loader = tplr.get_dataloader(
             train_dataset, batch_size=self.config.micro_batch_size, shuffle=True
         )
-        if self.global_rank == 0:
-            # Log memory after dataset creation
-            ram_after = psutil.virtual_memory()
-            tplr.logger.info(
-                f"RAM after dataset creation: {ram_after.used / 1024**3:.2f}GB used, "
-                f"{ram_after.available / 1024**3:.2f}GB available"
-            )
 
     def _create_scheduler(self, optimizer, lr):
         """Create a standard scheduler with warmup and cosine annealing."""
@@ -766,7 +804,7 @@ class DistributedLLMTrainer:
 
     def _setup_wandb_and_logging(self):
         """Set up WandB and timing loggers."""
-        if self.global_rank == 0:
+        if self.global_rank == 0 and not self.config.no_wandb:
             self.wandb = wandb.init(
                 project=self.config.project,
                 name=f"{self.config.run_name}" if self.config.run_name else "runner",
@@ -1004,7 +1042,8 @@ class DistributedLLMTrainer:
 
                 metrics_dict.update(timer_metrics)
 
-                self.wandb.log(metrics_dict, step=self.global_step)
+                if self.wandb is not None:
+                    self.wandb.log(metrics_dict, step=self.global_step)
 
                 # Update total tokens processed
                 self.total_tokens_processed += batch_tokens
