@@ -172,18 +172,35 @@ class ShadedDataset(Dataset):
         return self.worker_tokens[start:end]
 
 
+class SyntheticDataset(Dataset):
+    """Generates random token sequences on the fly — no files needed."""
+
+    def __init__(self, vocab_size: int, sequence_length: int, num_samples: int):
+        self.vocab_size = vocab_size
+        self.sequence_length = sequence_length
+        self.num_samples = num_samples
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, idx):
+        return torch.randint(0, self.vocab_size, (self.sequence_length,))
+
+
 def get_dataloader(
     dataset: ShadedDataset,
     batch_size: int,
     shuffle: bool = True,
 ) -> DataLoader:
     """Create DataLoader for ShadedDataset with appropriate memory settings."""
-    if not isinstance(dataset, ShadedDataset):
-        raise TypeError("dataset must be an instance of ShadedDataset")
+    if not isinstance(dataset, (ShadedDataset, SyntheticDataset)):
+        raise TypeError("dataset must be an instance of ShadedDataset or SyntheticDataset")
+
+    pin_memory = not dataset.pin_to_gpu if isinstance(dataset, ShadedDataset) else False
 
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
-        pin_memory=not dataset.pin_to_gpu,
+        pin_memory=pin_memory,
     )
