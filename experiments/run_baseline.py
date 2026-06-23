@@ -17,7 +17,7 @@ import json
 import time
 from pathlib import Path
 
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 import torch
 from torch.utils.data import DataLoader
@@ -56,8 +56,12 @@ def parse_args():
     p.add_argument("--smoke", action="store_true", help="Fast smoke test with tiny model")
     p.add_argument("--hparams", type=str, default=None, help="Override hparams file")
     p.add_argument("--outer-steps", type=int, default=20)
+    p.add_argument("--n-workers", type=int, default=None, help="Override number of workers (default: 8)")
+    p.add_argument("--H", type=int, default=None, help="Override inner steps per outer step (default: 500)")
+    p.add_argument("--batch-size", type=int, default=None, help="Override batch size")
     p.add_argument("--data-path", type=str, default=None, help="Path to pre-tokenized .npy shards")
     p.add_argument("--device", type=str, default="cpu")
+    p.add_argument("--offload", action="store_true", help="Page workers on/off device one at a time to reduce peak VRAM")
     p.add_argument("--out", type=str, default="experiments/results/baseline.json")
     return p.parse_args()
 
@@ -111,6 +115,12 @@ def run(args):
         cfg = {**cfg, "outer_steps": args.outer_steps}
     if args.hparams:
         cfg = {**cfg, "hparams": args.hparams}
+    if args.n_workers is not None:
+        cfg = {**cfg, "n_workers": args.n_workers}
+    if args.H is not None:
+        cfg = {**cfg, "H": args.H}
+    if args.batch_size is not None:
+        cfg = {**cfg, "batch_size": args.batch_size}
 
     print(f"\n{'='*60}")
     print(f"  DiLoCo Baseline — {'SMOKE TEST' if args.smoke else 'FULL RUN'}")
@@ -119,6 +129,7 @@ def run(args):
     print(f"  H       : {cfg['H']}")
     print(f"  steps   : {cfg['outer_steps']}")
     print(f"  device  : {args.device}")
+    print(f"  offload : {args.offload}")
     print(f"{'='*60}\n")
 
     # Model
@@ -141,6 +152,7 @@ def run(args):
     sim_config = SimConfig(
         H=cfg["H"],
         device=args.device,
+        offload_between_steps=args.offload,
     )
     workers = [
         Worker(rank=i, model=model, dataloader=loaders[i], config=sim_config)
