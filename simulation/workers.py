@@ -36,6 +36,7 @@ class SimConfig:
     # Move each worker on/off the device one at a time to reduce peak VRAM.
     # Required on GPUs with <16GB when running 8 workers at 124M params.
     offload_between_steps: bool = False
+    verbose: bool = False
 
 
 class Worker:
@@ -118,7 +119,7 @@ class Worker:
         self.model.train()
         losses = []
 
-        for _ in tqdm(range(steps), desc=f"Worker {self.rank}", leave=False):
+        for _ in range(steps):
             batch = self._next_batch()
             input_ids = batch.to(self.device)
             labels = input_ids.clone()
@@ -236,6 +237,8 @@ class Simulation:
         worker_metrics = []
         pseudo_grads = []
         for w in self.workers:
+            if self.config.verbose:
+                print(f"  outer {self.outer_step_count + 1} | worker {w.rank}/{len(self.workers) - 1}", flush=True)
             if self.config.offload_between_steps:
                 w.model.to(w.device)
             m = w.inner_step(steps=self.config.H)

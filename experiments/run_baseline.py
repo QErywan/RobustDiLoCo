@@ -62,6 +62,7 @@ def parse_args():
     p.add_argument("--data-path", type=str, default=None, help="Path to pre-tokenized .npy shards")
     p.add_argument("--device", type=str, default="cpu")
     p.add_argument("--offload", action="store_true", help="Page workers on/off device one at a time to reduce peak VRAM")
+    p.add_argument("--verbose", action="store_true", help="Print per-worker progress during each outer step")
     p.add_argument("--out", type=str, default="experiments/results/baseline.json")
     return p.parse_args()
 
@@ -153,6 +154,7 @@ def run(args):
         H=cfg["H"],
         device=args.device,
         offload_between_steps=args.offload,
+        verbose=args.verbose,
     )
     workers = [
         Worker(rank=i, model=model, dataloader=loaders[i], config=sim_config)
