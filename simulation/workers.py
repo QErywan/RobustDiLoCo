@@ -33,6 +33,9 @@ class SimConfig:
     # Hardware
     device: str = "cpu"
     dtype: torch.dtype = torch.float32
+    # Move each worker on/off the device one at a time to reduce peak VRAM.
+    # Required on GPUs with <16GB when running 8 workers at 124M params.
+    offload_between_steps: bool = False
 
 
 class Worker:
@@ -56,8 +59,11 @@ class Worker:
         self.config = config
         self.device = torch.device(config.device)
 
-        # Each worker gets its own deep copy of the model
-        self.model = copy.deepcopy(model).to(self.device)
+        # Each worker gets its own deep copy of the model.
+        # With offload_between_steps, models start on CPU and are paged to the
+        # device only during their active step, keeping peak VRAM to one worker.
+        init_device = "cpu" if config.offload_between_steps else self.device
+        self.model = copy.deepcopy(model).to(init_device)
 
         self.dataloader = dataloader
         self._data_iter = iter(dataloader)
@@ -228,12 +234,17 @@ class Simulation:
 
         # 1. Each worker runs H inner steps independently (no communication)
         worker_metrics = []
+        pseudo_grads = []
         for w in self.workers:
+            if self.config.offload_between_steps:
+                w.model.to(w.device)
             m = w.inner_step(steps=self.config.H)
             worker_metrics.append(m)
+            pseudo_grads.append(w.compute_pseudo_grad())
+            if self.config.offload_between_steps:
+                w.model.to("cpu")
 
-        # 2. Collect pseudo-gradients — one flat tensor per worker
-        pseudo_grads = [w.compute_pseudo_grad() for w in self.workers]
+        # 2. Collect pseudo-gradients — one flat tensor per worker (already done above if offloading)
 
         # Record norms before perturbation for diagnostics
         pg_norms_before = [g.norm().item() for g in pseudo_grads]
@@ -246,7 +257,11 @@ class Simulation:
 
         # 5. Apply outer update to all workers
         for w in self.workers:
+            if self.config.offload_between_steps:
+                w.model.to(w.device)
             w.apply_outer_update(aggregated)
+            if self.config.offload_between_steps:
+                w.model.to("cpu")
 
         self.outer_step_count += 1
 

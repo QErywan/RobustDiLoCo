@@ -1,0 +1,13 @@
+{
+    "model_type": "gpt2",
+    "tokenizer_name": "gpt2",
+    "vocab_size": 50257,
+    "n_embd": 384,
+    "n_layer": 6,
+    "n_head": 6,
+    "n_inner": 1536,
+    "n_positions": 1024,
+    "resid_pdrop": 0.0,
+    "embd_pdrop": 0.0,
+    "attn_pdrop": 0.0
+}
