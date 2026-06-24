@@ -23,6 +23,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from tplr.data import SyntheticDataset, ShadedDataset
+from simulation.data import make_hf_loaders
 from simulation.model import build_model, param_count
 from simulation.workers import SimConfig, Worker, Simulation
 from simulation.aggregators import MeanAggregator
@@ -59,7 +60,8 @@ def parse_args():
     p.add_argument("--n-workers", type=int, default=None, help="Override number of workers (default: 8)")
     p.add_argument("--H", type=int, default=None, help="Override inner steps per outer step (default: 500)")
     p.add_argument("--batch-size", type=int, default=None, help="Override batch size")
-    p.add_argument("--data-path", type=str, default=None, help="Path to pre-tokenized .npy shards")
+    p.add_argument("--dataset", type=str, default="synthetic", choices=["synthetic", "c4", "fineweb"], help="Data source")
+    p.add_argument("--data-path", type=str, default=None, help="Path to pre-tokenized .npy shards (synthetic mode only)")
     p.add_argument("--device", type=str, default="cpu")
     p.add_argument("--offload", action="store_true", help="Page workers on/off device one at a time to reduce peak VRAM")
     p.add_argument("--verbose", action="store_true", help="Print per-worker progress during each outer step")
@@ -71,27 +73,33 @@ def parse_args():
 # Data
 # ---------------------------------------------------------------------------
 
+HF_DATASET_CONFIG = {
+    "c4":      ("allenai/c4", "en",      "gpt2"),
+    "fineweb": ("HuggingFaceFW/fineweb", "default", "gpt2"),
+}
+
+
 def make_worker_loaders(
     n_workers: int,
     vocab_size: int,
     seq_len: int,
     batch_size: int,
+    dataset: str,
     data_path: str | None,
     device: str,
 ) -> list[DataLoader]:
-    """One DataLoader per worker. Synthetic if no data_path, real shards otherwise."""
-    if data_path is None:
-        # Each worker gets its own SyntheticDataset instance (independent streams)
-        loaders = []
-        for _ in range(n_workers):
-            ds = SyntheticDataset(
-                vocab_size=vocab_size,
-                sequence_length=seq_len,
-                num_samples=100_000,
-            )
-            loaders.append(DataLoader(ds, batch_size=batch_size, shuffle=True))
-        return loaders
-    else:
+    """One DataLoader per worker."""
+    if dataset in HF_DATASET_CONFIG:
+        ds_name, ds_config, tokenizer_name = HF_DATASET_CONFIG[dataset]
+        print(f"Streaming {dataset} from HuggingFace ({ds_name})...")
+        return make_hf_loaders(
+            dataset_name=ds_name,
+            tokenizer_name=tokenizer_name,
+            seq_len=seq_len,
+            batch_size=batch_size,
+            n_workers=n_workers,
+        )
+    elif data_path is not None:
         loaders = []
         for rank in range(n_workers):
             ds = ShadedDataset(
@@ -101,6 +109,16 @@ def make_worker_loaders(
                 rank=rank,
                 world_size=n_workers,
                 device=torch.device(device),
+            )
+            loaders.append(DataLoader(ds, batch_size=batch_size, shuffle=True))
+        return loaders
+    else:
+        loaders = []
+        for _ in range(n_workers):
+            ds = SyntheticDataset(
+                vocab_size=vocab_size,
+                sequence_length=seq_len,
+                num_samples=100_000,
             )
             loaders.append(DataLoader(ds, batch_size=batch_size, shuffle=True))
         return loaders
@@ -145,6 +163,7 @@ def run(args):
         vocab_size=vocab_size,
         seq_len=cfg["seq_len"],
         batch_size=cfg["batch_size"],
+        dataset=args.dataset,
         data_path=args.data_path,
         device=args.device,
     )
