@@ -74,7 +74,7 @@ TOKENIZER_NAME  = "gpt2"
 DATASET_NAME    = "allenai/c4"
 DATASET_CONFIG  = "en"
 TOKENS_PER_SHARD = 100_000_000   # 100M tokens per file → ~200MB per shard at int16
-DTYPE           = np.int16       # GPT-2 vocab (50257) fits in uint16; int16 for simplicity
+DTYPE           = np.uint16      # GPT-2 vocab (50257) fits in uint16 (max 65535); ShadedDataset casts to int32 on load
 
 
 # ---------------------------------------------------------------------------
@@ -170,11 +170,11 @@ def write_meta(out_dir: Path, n_train: int, n_val: int, shard_size: int) -> None
         "n_train_tokens":   n_train,
         "n_val_tokens":     n_val,
         "tokens_per_shard": shard_size,
-        "dtype":            "int16",
+        "dtype":            "uint16",
         "note": (
-            "int16 is safe for GPT-2 vocab (50257 < 32767 unsigned, but stored "
-            "as signed int16; ShadedDataset casts to int32 on load so negative "
-            "values wrap correctly when reinterpreted as int32 via astype)."
+            "uint16 covers GPT-2 vocab (50257 < 65535). "
+            "ShadedDataset loads with np.load().astype(np.int32), which correctly "
+            "widens uint16 values to int32 without sign issues."
         ),
     }
     with open(out_dir / "meta.json", "w") as fh:
@@ -271,7 +271,7 @@ def main():
     print(f"  out_dir    : {out_dir}")
     print(f"  train toks : {args.n_train_tokens:,}")
     print(f"  val toks   : {args.n_val_tokens:,}")
-    print(f"  shard size : {args.shard_size:,} tokens ({args.shard_size*2/1e9:.2f}GB per shard @ int16)")
+    print(f"  shard size : {args.shard_size:,} tokens ({args.shard_size*2/1e9:.2f}GB per shard @ uint16)")
     print(f"  tokenizer  : {TOKENIZER_NAME}")
     print(f"  dataset    : {DATASET_NAME} ({DATASET_CONFIG})")
     print(f"{'='*60}\n")
