@@ -97,39 +97,59 @@ HETERO_ALPHAS     = [0.1, 0.5, 1.0]     # Dirichlet α (lower = more heterogeneo
 
 
 def _tier1_cells(seed: int = PRIMARY_SEED) -> list[Cell]:
-    """~105 cells for the full Tier-1 comparative grid."""
+    """~90 active cells for the Tier-1 comparative grid.
+
+    Cell ORDER is thesis-priority:
+        1. Clean baseline       — primary sanity check and clean reference loss
+        2. Magnitude attack     — the thesis's central Byzantine result (expected
+                                  to show the largest aggregator gap); runs first
+                                  so the headline result lands in hours not days
+        3. Gaussian noise       — secondary Byzantine result
+        4. Worker dropout       — expected smaller gap (H=500 smooths dropouts)
+        5. Heterogeneous data   — data-level perturbation; skipped until loader
+                                  is wired in (see sweep.py run_sweep)
+
+    Cell-level resume (skipping existing JSONs) makes the ordering safe to change
+    between runs — already-completed cells are just skipped.
+    """
     cells = []
 
     # 1. Clean baseline — no perturbation, no Byzantine workers
+    #    ALL 5 aggregators × seed; these must overlap (sanity check).
     for agg in AGGREGATORS:
         cells.append(Cell(agg, "none", 0, 0.0, seed, 1))
 
-    # 2. Worker dropout — f ∈ {1, 2, 4}
+    # 2. Magnitude attack — the decisive Byzantine condition.
+    #    scale ∈ {10, 100, 1000} × f ∈ {1, 2, 4}: 3 × 3 × 5 = 45 cells.
+    #    Run mid-range f=2 first so the key thesis plot appears early.
     for agg in AGGREGATORS:
-        for f in DROPOUT_F_VALUES:
-            cells.append(Cell(agg, "dropout", f, 0.0, seed, 1))
+        for scale in MAGNITUDE_SCALES:
+            cells.append(Cell(agg, "magnitude", 2, scale, seed, 1))   # f=2 first
+    for agg in AGGREGATORS:
+        for scale in MAGNITUDE_SCALES:
+            for f in [1, 4]:   # f=1 and f=4 after f=2 is complete
+                cells.append(Cell(agg, "magnitude", f, scale, seed, 1))
 
     # 3. Gaussian noise — (a) vary sigma at fixed f=2; (b) vary f at fixed sigma=0.5
     for agg in AGGREGATORS:
         # (a) sigma sweep at f=2
         for sigma in GAUSSIAN_SIGMA:
             cells.append(Cell(agg, "gaussian", GAUSSIAN_F, sigma, seed, 1))
-        # (b) f sweep at sigma=0.5 (avoid duplicating the f=2, sigma=0.5 cell)
+        # (b) f sweep at sigma=0.5 (avoid duplicating f=2, sigma=0.5)
         for f in DROPOUT_F_VALUES:
             if f != GAUSSIAN_F:  # f=2 already covered above
                 cells.append(Cell(agg, "gaussian", f, 0.5, seed, 1))
 
-    # 4. Magnitude attack — scale ∈ {10, 100, 1000} × f ∈ {1, 2, 4}
+    # 4. Worker dropout — f ∈ {1, 2, 4}
     for agg in AGGREGATORS:
-        for scale in MAGNITUDE_SCALES:
-            for f in MAGNITUDE_F:
-                cells.append(Cell(agg, "magnitude", f, scale, seed, 1))
+        for f in DROPOUT_F_VALUES:
+            cells.append(Cell(agg, "dropout", f, 0.0, seed, 1))
 
     # 5. Heterogeneous data — Dirichlet α ∈ {0.1, 0.5, 1.0}, no Byzantine workers
     #    NOTE: hetero is a data-level perturbation implemented via the dataset loader,
     #    not via the perturbations.py hook.  The runner handles this via --perturbation
     #    hetero (TODO: implement in run_experiment.py once data.py has HeterogeneousData).
-    #    Cells are listed here for completeness; they will be skipped in --dry-run
+    #    Cells are listed here for completeness; they will be skipped in run_sweep
     #    and flagged as pending until the loader is ready.
     for agg in AGGREGATORS:
         for alpha in HETERO_ALPHAS:
@@ -227,6 +247,8 @@ def build_command(cell: Cell, args: argparse.Namespace) -> list[str]:
         "--out",           str(cell.result_path),
         "--save-every",    str(args.save_every),
     ]
+    if args.data_path:
+        cmd += ["--data-path", args.data_path]
     if args.offload:
         cmd.append("--offload")
     if args.verbose:
@@ -323,11 +345,16 @@ def parse_args() -> argparse.Namespace:
                    help="Override batch size for all cells")
 
     # Hardware + data
-    p.add_argument("--device",   type=str,  default="cuda")
-    p.add_argument("--dataset",  type=str,  default="c4",
+    p.add_argument("--device",    type=str,  default="cuda")
+    p.add_argument("--dataset",   type=str,  default="c4",
                    choices=["synthetic", "c4", "fineweb"])
-    p.add_argument("--offload",  action="store_true")
-    p.add_argument("--verbose",  action="store_true")
+    p.add_argument("--data-path", type=str,  default=None,
+                   help="Path to pre-tokenized .npy shards written by pretokenize.py. "
+                        "If set, ALL cells use the fast shard loader instead of streaming. "
+                        "REQUIRED for the reported sweep (ensure pipeline consistency). "
+                        "Example: /vol/bitbucket/qe25/data/c4_gpt2")
+    p.add_argument("--offload",   action="store_true")
+    p.add_argument("--verbose",   action="store_true")
 
     # Resume / checkpointing
     p.add_argument("--resume",     action="store_true",

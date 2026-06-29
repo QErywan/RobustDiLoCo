@@ -30,6 +30,32 @@ from simulation.aggregators import MeanAggregator
 from simulation.perturbations import NoPerturbation
 
 
+def _load_shard_meta(data_path: str) -> dict:
+    """
+    Load meta.json written by pretokenize.py so we know the exact token
+    counts to pass to ShadedDataset.  Falls back to safe defaults if the
+    file is absent (e.g. legacy shard dirs).
+    """
+    meta_path = Path(data_path) / "meta.json"
+    if meta_path.exists():
+        with open(meta_path) as fh:
+            return json.load(fh)
+    # Fallback: count tokens by scanning shard file sizes.
+    # All shards must be int16 (2 bytes/token) for the size estimate to work.
+    train_files = sorted(Path(data_path).glob("train_*.npy"))
+    val_files   = sorted(Path(data_path).glob("validation_*.npy"))
+    tokens_per_shard = (
+        Path(train_files[0]).stat().st_size // 2 if train_files else 100_000_000
+    )
+    n_train = sum(f.stat().st_size // 2 for f in train_files)
+    n_val   = sum(f.stat().st_size // 2 for f in val_files)
+    return {
+        "n_train_tokens":   n_train,
+        "n_val_tokens":     n_val,
+        "tokens_per_shard": tokens_per_shard,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -88,10 +114,45 @@ def make_worker_loaders(
     data_path: str | None,
     device: str,
 ) -> list[DataLoader]:
-    """One DataLoader per worker."""
+    """One DataLoader per worker.
+
+    Routing priority:
+        1. --data-path given → pre-tokenized ShadedDataset (fastest; pipeline
+           consistency requires ALL cells in a reported sweep to use this path).
+        2. dataset in {"c4", "fineweb"} and no data-path → HFStreamingDataset
+           (slow: tokenizes on the fly; use only for smoke tests or profiling).
+        3. Fallback → SyntheticDataset (random tokens; smoke tests only).
+    """
+    if data_path is not None:
+        # Pre-tokenized shards — fastest path.
+        # Read meta.json for exact token counts so ShadedDataset slices correctly.
+        meta = _load_shard_meta(data_path)
+        n_train_tokens   = meta["n_train_tokens"]
+        tokens_per_shard = meta["tokens_per_shard"]
+        print(f"[data] Pre-tokenized shards: {data_path}  "
+              f"({n_train_tokens/1e6:.0f}M train tokens, shard_size={tokens_per_shard/1e6:.0f}M)")
+        loaders = []
+        for rank in range(n_workers):
+            ds = ShadedDataset(
+                shards_path=data_path,
+                token_budget=n_train_tokens,
+                sequence_length=seq_len,
+                rank=rank,
+                world_size=n_workers,
+                device=torch.device(device),
+                shard_token_size=tokens_per_shard,
+                split="train",
+            )
+            loaders.append(DataLoader(ds, batch_size=batch_size, shuffle=True,
+                                      num_workers=0))
+        return loaders
+
     if dataset in HF_DATASET_CONFIG:
+        # Streaming from HuggingFace — slow (CPU tokenization in the loop).
+        # Retained for smoke tests and profiling; not recommended for full sweeps.
         ds_name, ds_config, tokenizer_name = HF_DATASET_CONFIG[dataset]
-        print(f"Streaming {dataset} from HuggingFace ({ds_name})...")
+        print(f"[data] Streaming {dataset} from HuggingFace ({ds_name})  "
+              f"[SLOW — run pretokenize.py and pass --data-path for full sweeps]")
         return make_hf_loaders(
             dataset_name=ds_name,
             tokenizer_name=tokenizer_name,
@@ -99,29 +160,17 @@ def make_worker_loaders(
             batch_size=batch_size,
             n_workers=n_workers,
         )
-    elif data_path is not None:
-        loaders = []
-        for rank in range(n_workers):
-            ds = ShadedDataset(
-                shards_path=data_path,
-                token_budget=int(5e9),
-                sequence_length=seq_len,
-                rank=rank,
-                world_size=n_workers,
-                device=torch.device(device),
-            )
-            loaders.append(DataLoader(ds, batch_size=batch_size, shuffle=True))
-        return loaders
-    else:
-        loaders = []
-        for _ in range(n_workers):
-            ds = SyntheticDataset(
-                vocab_size=vocab_size,
-                sequence_length=seq_len,
-                num_samples=100_000,
-            )
-            loaders.append(DataLoader(ds, batch_size=batch_size, shuffle=True))
-        return loaders
+
+    # Synthetic random data — smoke tests only.
+    loaders = []
+    for _ in range(n_workers):
+        ds = SyntheticDataset(
+            vocab_size=vocab_size,
+            sequence_length=seq_len,
+            num_samples=100_000,
+        )
+        loaders.append(DataLoader(ds, batch_size=batch_size, shuffle=True))
+    return loaders
 
 
 # ---------------------------------------------------------------------------
