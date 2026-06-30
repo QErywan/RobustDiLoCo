@@ -54,6 +54,24 @@ AGG_COLOURS = {
     "krum":    "#9467bd",   # purple
 }
 
+# Linestyle and marker per aggregator — used in both absolute and residual modes so
+# curves remain distinguishable even when colours overlap.
+AGG_LINESTYLES = {
+    "mean":    "-",
+    "trimmed": "--",
+    "median":  "-.",
+    "rfa":     ":",
+    "krum":    (0, (3, 1, 1, 1)),   # densely dashdotted
+}
+
+AGG_MARKERS = {
+    "mean":    None,
+    "trimmed": "o",
+    "median":  "s",
+    "rfa":     "^",
+    "krum":    "D",
+}
+
 AGG_ORDER = ["mean", "trimmed", "median", "rfa", "krum"]
 
 
@@ -290,12 +308,27 @@ def plot_condition(
     severity: float,
     out_path: Path,
     title: str | None = None,
+    mode: str = "absolute",
 ) -> bool:
     """
     Plot loss-vs-step curves for all aggregators present in a given condition,
     one coloured line per aggregator.
 
-    Returns True if the plot was written, False if no matching cells were found.
+    Parameters
+    ----------
+    mode : "absolute" | "residual"
+        "absolute"  — raw loss/mean per step (default, good when gaps are large).
+        "residual"  — loss[agg] − loss[mean] per step so that mean becomes a flat
+                      zero reference and overlapping curves spread into a readable
+                      band.  Alignment is by outer_step, not by index, so partial
+                      runs (different lengths) are handled correctly.  Returns False
+                      if no mean cell is present or if mean losses are all NaN.
+
+    In both modes each aggregator gets a distinct linestyle + sparse marker
+    (AGG_LINESTYLES / AGG_MARKERS) so lines remain distinguishable even where
+    colours overlap.
+
+    Returns True if the plot was written, False otherwise.
     """
     plt = _get_matplotlib()
     if plt is None:
@@ -310,6 +343,26 @@ def plot_condition(
     if not matching:
         return False
 
+    # ------------------------------------------------------------------
+    # Residual mode: build a step→loss lookup from the mean cell
+    # ------------------------------------------------------------------
+    mean_lookup: dict[int, float] = {}
+    if mode == "residual":
+        mean_cells = [c for c in matching if c["aggregator"] == "mean"]
+        if not mean_cells:
+            return False
+        mean_hist = mean_cells[0].get("history", [])
+        mean_lookup = {
+            h["outer_step"]: h["loss/mean"]
+            for h in mean_hist
+            if h["loss/mean"] is not None and not (h["loss/mean"] != h["loss/mean"])  # not NaN
+        }
+        if not mean_lookup:
+            return False  # mean is all-NaN; residual undefined
+
+    # ------------------------------------------------------------------
+    # Plot
+    # ------------------------------------------------------------------
     fig, ax = plt.subplots(figsize=(7, 4))
 
     for cell in sorted(matching, key=lambda c: AGG_ORDER.index(c["aggregator"])
@@ -317,23 +370,50 @@ def plot_condition(
         history = cell.get("history", [])
         if not history:
             continue
-        steps = [h["outer_step"] for h in history]
-        losses = [h["loss/mean"] for h in history]
         agg = cell["aggregator"]
+
+        if mode == "residual":
+            # Align by outer_step; only include steps where mean is defined
+            pairs = [
+                (h["outer_step"], h["loss/mean"] - mean_lookup[h["outer_step"]])
+                for h in history
+                if h["outer_step"] in mean_lookup
+                and h["loss/mean"] is not None
+                and not (h["loss/mean"] != h["loss/mean"])  # not NaN
+            ]
+            if not pairs:
+                continue
+            steps, losses = zip(*pairs)
+        else:
+            steps  = [h["outer_step"] for h in history]
+            losses = [h["loss/mean"]   for h in history]
+
+        markevery = max(1, len(steps) // 8)
         ax.plot(
             steps, losses,
             label=AGG_LABELS.get(agg, agg),
             color=AGG_COLOURS.get(agg, "grey"),
+            linestyle=AGG_LINESTYLES.get(agg, "-"),
+            marker=AGG_MARKERS.get(agg),
+            markevery=markevery,
+            markersize=4,
             linewidth=1.8,
         )
 
+    if mode == "residual":
+        ax.axhline(0, color="grey", lw=0.8, ls="--")
+        ax.set_ylabel("Loss − mean (Δ)")
+    else:
+        ax.set_ylabel("Loss (mean across workers)")
+
     ax.set_xlabel("Outer step")
-    ax.set_ylabel("Loss (mean across workers)")
     ax.legend(fontsize=8, loc="upper right")
     ax.grid(True, alpha=0.3)
 
     if title is None:
         title = f"pert={perturbation}  f={byzantine_f}  sev={severity}"
+    if mode == "residual":
+        title += "  [residual vs mean]"
     ax.set_title(title, fontsize=10)
 
     fig.tight_layout()
@@ -413,6 +493,18 @@ def main():
     if not written:
         print("[analyze] NOTE: no clean-baseline cells found.")
 
+    # Residual twin: mean is the flat-zero reference; other aggregators spread
+    # into a readable band.  A curve flying off the band = implementation bug.
+    plot_condition(
+        cells,
+        perturbation="none",
+        byzantine_f=0,
+        severity=0.0,
+        out_path=out_dir / "clean_baseline_residual.png",
+        title="Clean baseline — residual vs mean (0 = mean reference)",
+        mode="residual",
+    )
+
     # Decisive perturbed conditions — plot whatever is present.
     # Magnitude attack is the thesis's primary positive result.
     perturbed_conditions = []
@@ -432,6 +524,11 @@ def main():
 
     perturbed_conditions.sort(key=_pert_sort)
 
+    # Perturbation types where curves are expected to stay close (small gaps) and
+    # benefit most from the residual view.  Magnitude/gaussian are excluded because
+    # mean diverges/NaN there, making the residual undefined.
+    RESIDUAL_PERTS = {"dropout", "hetero"}
+
     for (pert, f, sev) in perturbed_conditions:
         sev_str = f"{sev:.0f}" if sev == int(sev) else f"{sev}"
         fname = f"{pert}_f{f}_s{sev_str}.png"
@@ -443,6 +540,17 @@ def main():
             out_path=out_dir / fname,
             title=f"{pert}  f={f}  severity={sev}",
         )
+        # Residual twin for conditions where aggregators are expected to overlap
+        if pert in RESIDUAL_PERTS:
+            plot_condition(
+                cells,
+                perturbation=pert,
+                byzantine_f=f,
+                severity=sev,
+                out_path=out_dir / fname.replace(".png", "_residual.png"),
+                title=f"{pert}  f={f}  severity={sev}  [residual vs mean]",
+                mode="residual",
+            )
 
     print(f"\n[analyze] Done. Outputs in {out_dir}")
 
