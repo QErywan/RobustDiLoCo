@@ -30,8 +30,16 @@ A JSON file at --out (default: experiments/results/<cell_id>.json) with schema:
       "config":  { all hyperparameters + aggregator/perturbation/f/seed },
       "history": [ { outer_step, loss/mean, loss/min, loss/max,
                      pseudo_grad_norm/mean, pseudo_grad_norm/max,
-                     aggregated_grad_norm, worker_losses }, ... ]
+                     aggregated_grad_norm, worker_losses }, ... ],
+      "status":  "running" | "completed" | "crashed",
+      "error":   { type, message, traceback, failed_at_step, oom? }  # only on crash
     }
+
+status is written on every JSON flush so the file is always interpretable:
+  "running"   — process still alive, or killed by SIGKILL (OOM-killer, no Python
+                 exception ran) before completing.
+  "completed" — all outer_steps done + eval written.
+  "crashed"   — Python exception caught; error block contains full traceback.
 
 This schema is identical to run_baseline.py so plot_baseline.py works unchanged.
 Checkpoint files are saved every --save-every steps to <out>.ckpt.pt so the run
@@ -41,7 +49,9 @@ can be resumed after a crash or timeout.
 import argparse
 import json
 import random
+import sys
 import time
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -411,89 +421,129 @@ def run(args):
     }
 
     # ------------------------------------------------------------------
-    # Training loop
+    # Training loop + evaluation (wrapped for error capture)
     # ------------------------------------------------------------------
     remaining = cfg["outer_steps"] - start_step
     print(f"{'Step':>6}  {'Loss':>8}  {'PGNorm':>9}  {'Time':>7}")
     print("-" * 42)
 
-    for _i in tqdm(range(remaining), desc="Outer steps", initial=start_step,
-                   total=cfg["outer_steps"]):
-        t0 = time.time()
-        metrics = sim.run_outer_step()
-        elapsed = time.time() - t0
-
-        history.append(metrics)
-        print(
-            f"{metrics['outer_step']:>6}  "
-            f"{metrics['loss/mean']:>8.4f}  "
-            f"{metrics['pseudo_grad_norm/mean']:>9.3f}  "
-            f"{elapsed:>6.1f}s"
-        )
-
-        current_step = metrics["outer_step"]
-
-        # Periodic JSON flush — results file is always up-to-date
-        with open(out_path, "w") as fh:
-            json.dump({"config": result_config, "history": history}, fh, indent=2)
-
-        # Checkpoint
-        if args.save_every > 0 and (current_step % args.save_every == 0):
-            save_checkpoint(ckpt_path, current_step, workers, sim, history)
-            print(f"  [ckpt saved at step {current_step}]")
-
-    # ------------------------------------------------------------------
-    # Held-out evaluation
-    # ------------------------------------------------------------------
     eval_metrics = {}
-
-    if args.eval_batches > 0:
-        print("\nRunning held-out evaluation...")
-        eval_loader = make_eval_loader(
-            dataset=args.dataset,
-            seq_len=cfg["seq_len"],
-            batch_size=cfg["batch_size"],
-            n_batches=args.eval_batches,
-            vocab_size=vocab_size,
-        )
-        eval_metrics = eval_perplexity(
-            sim.global_model,
-            eval_loader,
-            device=args.device,
-            n_batches=args.eval_batches,
-        )
-        print(
-            f"  eval_loss  : {eval_metrics['eval_loss']:.4f}\n"
-            f"  perplexity : {eval_metrics['perplexity']:.2f}\n"
-            f"  n_tokens   : {eval_metrics['n_tokens']}"
-        )
-
-    # Downstream benchmarks — clean configs only
     downstream_metrics = {}
-    if args.downstream_eval:
-        if args.perturbation != "none" or args.byzantine_f != 0:
-            print(
-                "\n[WARNING] --downstream-eval requested on a non-clean config "
-                f"(perturbation={args.perturbation}, f={args.byzantine_f}). "
-                "Downstream eval is only meaningful for clean baselines. Skipping."
-            )
-        else:
-            print("\nRunning downstream evaluation (HellaSwag / ARC-Easy / PIQA)...")
-            try:
-                downstream_metrics = run_downstream_eval(
-                    sim.global_model, device=args.device
-                )
-                print("  " + "  ".join(f"{k}: {v:.3f}" for k, v in downstream_metrics.items()))
-            except ImportError as e:
-                print(f"  [SKIP] {e}")
 
-    # Final flush — include eval metrics in the JSON
+    try:
+        for _i in tqdm(range(remaining), desc="Outer steps", initial=start_step,
+                       total=cfg["outer_steps"]):
+            t0 = time.time()
+            metrics = sim.run_outer_step()
+            elapsed = time.time() - t0
+
+            history.append(metrics)
+            print(
+                f"{metrics['outer_step']:>6}  "
+                f"{metrics['loss/mean']:>8.4f}  "
+                f"{metrics['pseudo_grad_norm/mean']:>9.3f}  "
+                f"{elapsed:>6.1f}s"
+            )
+
+            current_step = metrics["outer_step"]
+
+            # Periodic JSON flush — results file is always up-to-date.
+            # status="running" means either in-progress or SIGKILL'd (OOM-killer) mid-run.
+            with open(out_path, "w") as fh:
+                json.dump({"config": result_config, "history": history,
+                           "status": "running"}, fh, indent=2)
+
+            # Checkpoint
+            if args.save_every > 0 and (current_step % args.save_every == 0):
+                save_checkpoint(ckpt_path, current_step, workers, sim, history)
+                print(f"  [ckpt saved at step {current_step}]")
+
+        # ------------------------------------------------------------------
+        # Held-out evaluation
+        # ------------------------------------------------------------------
+        if args.eval_batches > 0:
+            print("\nRunning held-out evaluation...")
+            eval_loader = make_eval_loader(
+                dataset=args.dataset,
+                seq_len=cfg["seq_len"],
+                batch_size=cfg["batch_size"],
+                n_batches=args.eval_batches,
+                vocab_size=vocab_size,
+            )
+            eval_metrics = eval_perplexity(
+                sim.global_model,
+                eval_loader,
+                device=args.device,
+                n_batches=args.eval_batches,
+            )
+            print(
+                f"  eval_loss  : {eval_metrics['eval_loss']:.4f}\n"
+                f"  perplexity : {eval_metrics['perplexity']:.2f}\n"
+                f"  n_tokens   : {eval_metrics['n_tokens']}"
+            )
+
+        # Downstream benchmarks — clean configs only
+        if args.downstream_eval:
+            if args.perturbation != "none" or args.byzantine_f != 0:
+                print(
+                    "\n[WARNING] --downstream-eval requested on a non-clean config "
+                    f"(perturbation={args.perturbation}, f={args.byzantine_f}). "
+                    "Downstream eval is only meaningful for clean baselines. Skipping."
+                )
+            else:
+                print("\nRunning downstream evaluation (HellaSwag / ARC-Easy / PIQA)...")
+                try:
+                    downstream_metrics = run_downstream_eval(
+                        sim.global_model, device=args.device
+                    )
+                    print("  " + "  ".join(f"{k}: {v:.3f}" for k, v in downstream_metrics.items()))
+                except ImportError as e:
+                    print(f"  [SKIP] {e}")
+
+    except Exception as e:
+        # Build the error record — include OOM flag if this is a CUDA OOM.
+        is_oom = isinstance(e, getattr(torch.cuda, "OutOfMemoryError", type(None)))
+        error_record = {
+            "type":            type(e).__name__,
+            "message":         str(e),
+            "traceback":       traceback.format_exc(),
+            "failed_at_step":  start_step + len(history),
+        }
+        if is_oom:
+            error_record["oom"] = True
+            torch.cuda.empty_cache()
+
+        print(
+            f"\n[CELL FAILED] {error_record['type']}: {error_record['message']}\n"
+            f"  failed_at_step={error_record['failed_at_step']}"
+            + ("  (CUDA OOM)" if is_oom else ""),
+            file=sys.stderr,
+        )
+
+        # Flush whatever history we have with status=crashed so the JSON is interpretable.
+        try:
+            with open(out_path, "w") as fh:
+                json.dump(
+                    {"config": result_config, "history": history,
+                     "status": "crashed", "error": error_record},
+                    fh, indent=2,
+                )
+        except Exception as write_err:
+            print(f"[CELL FAILED] additionally failed to write error JSON: {write_err}",
+                  file=sys.stderr)
+
+        sys.exit(1)
+
+    # ------------------------------------------------------------------
+    # Final flush — completed successfully
+    # ------------------------------------------------------------------
     with open(out_path, "w") as fh:
         json.dump(
             {
-                "config":   result_config,
-                "history":  history,
-                "eval":     eval_metrics,
+                "config":     result_config,
+                "history":    history,
+                "status":     "completed",
+                "eval":       eval_metrics,
                 "downstream": downstream_metrics,
             },
             fh,

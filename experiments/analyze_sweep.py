@@ -91,6 +91,9 @@ def load_cells(results_dir: str | Path) -> list[dict[str, Any]]:
         - "n_steps"    → number of outer steps recorded in history
         - "final_loss" → loss/mean at the last history entry (None if empty)
         - "perplexity" → eval.perplexity if present, else None
+        - "status"     → "completed" | "crashed" | "running" (back-compat: inferred
+                          from eval presence for legacy JSONs without an explicit field)
+        - "error"      → error dict if status=="crashed", else None
     """
     results_dir = Path(results_dir)
     paths = sorted(results_dir.glob("*.json"))
@@ -120,6 +123,16 @@ def load_cells(results_dir: str | Path) -> list[dict[str, Any]]:
 
         perplexity = eval_block.get("perplexity") if eval_block else None
 
+        # Determine status — explicit field takes priority; infer for legacy JSONs.
+        if "status" in data:
+            status = data["status"]
+        elif eval_block:
+            status = "completed"   # legacy: has eval → finished
+        else:
+            status = "running"     # legacy: no eval, no explicit status → interrupted
+
+        error = data.get("error")  # None for non-crashed cells
+
         cells.append({
             **data,
             "file":       p,
@@ -127,6 +140,8 @@ def load_cells(results_dir: str | Path) -> list[dict[str, Any]]:
             "n_steps":    len(history),
             "final_loss": final_loss,
             "perplexity": perplexity,
+            "status":     status,
+            "error":      error,
             # Shortcut config fields for convenience
             "aggregator":   config.get("aggregator",   p.stem.split("_p")[0]),
             "perturbation": config.get("perturbation", "unknown"),
@@ -153,6 +168,7 @@ def final_metrics(cell: dict) -> dict:
         "severity":    cell["severity"],
         "seed":        cell["seed"],
         "n_steps":     cell["n_steps"],
+        "status":      cell.get("status", "running"),
         "final_loss":  cell["final_loss"],
         "perplexity":  cell["perplexity"],
     }
@@ -163,14 +179,14 @@ def build_table(cells: list[dict], out_path: Path) -> list[dict]:
     Write summary.csv and return the rows as a list of dicts.
 
     Columns: cell_id, aggregator, perturbation, byzantine_f, severity, seed,
-             n_steps, final_loss, perplexity.
+             n_steps, status, final_loss, perplexity.
     """
     rows = [final_metrics(c) for c in cells]
     rows.sort(key=lambda r: (r["perturbation"], r["byzantine_f"],
                               r["severity"], r["aggregator"]))
 
     fieldnames = ["cell_id", "aggregator", "perturbation", "byzantine_f",
-                  "severity", "seed", "n_steps", "final_loss", "perplexity"]
+                  "severity", "seed", "n_steps", "status", "final_loss", "perplexity"]
     with open(out_path, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
@@ -452,14 +468,36 @@ def main():
         print("[analyze] No cells loaded — nothing to analyse.", file=sys.stderr)
         sys.exit(1)
 
+    # ------------------------------------------------------------------
+    # Crashed cells — show before anything else so errors are visible
+    # ------------------------------------------------------------------
+    crashed = [c for c in cells if c.get("status") == "crashed"]
+    if crashed:
+        print(f"\n{'='*64}")
+        print(f"CRASHED CELLS  ({len(crashed)} cells failed with a recorded exception)")
+        print(f"{'='*64}")
+        for c in crashed:
+            err = c.get("error") or {}
+            oom_tag = "  [CUDA OOM]" if err.get("oom") else ""
+            print(
+                f"  {c['cell_id']}\n"
+                f"    failed_at_step={err.get('failed_at_step', '?')}  "
+                f"error={err.get('type', '?')}: {err.get('message', '')[:120]}"
+                f"{oom_tag}"
+            )
+        print(f"{'='*64}")
+    else:
+        print("[analyze] No crashed cells (status=crashed) found.")
+
     # Flag cells with fewer steps than expected (interrupted or in-progress)
     max_steps = max(c["n_steps"] for c in cells)
-    incomplete = [c for c in cells if c["n_steps"] < max_steps and c["n_steps"] > 0]
+    incomplete = [c for c in cells if c["n_steps"] < max_steps and c["n_steps"] > 0
+                  and c.get("status") != "crashed"]
     if incomplete:
         print(f"[analyze] NOTE: {len(incomplete)} cells have fewer than {max_steps} steps "
               f"(may be in-progress or interrupted):")
         for c in incomplete:
-            print(f"  {c['cell_id']}  n_steps={c['n_steps']}")
+            print(f"  {c['cell_id']}  n_steps={c['n_steps']}  status={c.get('status','?')}")
 
     # ------------------------------------------------------------------
     # Coverage report

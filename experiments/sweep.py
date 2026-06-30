@@ -45,6 +45,7 @@ python experiments/sweep.py --tier 1 --only-aggregator rfa --device cuda
 """
 
 import argparse
+import datetime
 import json
 import subprocess
 import sys
@@ -288,6 +289,9 @@ def run_sweep(args: argparse.Namespace) -> None:
         print(f"\n{n_total - n_skip} cells to run, {n_skip} to skip.")
         return
 
+    # Persistent failures log — survives sweep restarts and terminal scroll.
+    failures_log = Path(cells[0].result_path.parent) / "failures.log"
+
     done = 0
     failed = []
     for i, cell in enumerate(cells, 1):
@@ -305,6 +309,10 @@ def run_sweep(args: argparse.Namespace) -> None:
         if result.returncode != 0:
             print(f"  ERROR: cell {cell.cell_id} exited with code {result.returncode}")
             failed.append(cell.cell_id)
+            # Append to persistent log so failures survive restarts.
+            ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(failures_log, "a") as fh:
+                fh.write(f"{ts}  exit={result.returncode}  {cell.cell_id}\n")
         else:
             done += 1
 
@@ -314,6 +322,7 @@ def run_sweep(args: argparse.Namespace) -> None:
         print("  Failed cells:")
         for cid in failed:
             print(f"    {cid}")
+        print(f"  Failures log: {failures_log}")
     print(f"{'='*60}\n")
 
     if failed:
