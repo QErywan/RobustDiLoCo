@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -381,6 +382,9 @@ def plot_condition(
     # ------------------------------------------------------------------
     fig, ax = plt.subplots(figsize=(7, 4))
 
+    # Collect all finite loss values in absolute mode to decide on log-scale.
+    all_finite_losses: list[float] = []
+
     for cell in sorted(matching, key=lambda c: AGG_ORDER.index(c["aggregator"])
                         if c["aggregator"] in AGG_ORDER else 99):
         history = cell.get("history", [])
@@ -401,14 +405,29 @@ def plot_condition(
                 continue
             steps, losses = zip(*pairs)
         else:
-            steps  = [h["outer_step"] for h in history]
-            losses = [h["loss/mean"]   for h in history]
+            # Filter to finite (step, loss) pairs only; record if this cell diverged.
+            finite_pairs = [
+                (h["outer_step"], h["loss/mean"])
+                for h in history
+                if h["loss/mean"] is not None and math.isfinite(h["loss/mean"])
+            ]
+            diverged = any(
+                h["loss/mean"] is None or not math.isfinite(h["loss/mean"])
+                for h in history
+            )
+            if not finite_pairs:
+                continue
+            steps, losses = zip(*finite_pairs)
+
+            # Track global finite range for log-scale decision below.
+            all_finite_losses.extend(losses)
 
         markevery = max(1, len(steps) // 8)
+        line_colour = AGG_COLOURS.get(agg, "grey")
         ax.plot(
             steps, losses,
             label=AGG_LABELS.get(agg, agg),
-            color=AGG_COLOURS.get(agg, "grey"),
+            color=line_colour,
             linestyle=AGG_LINESTYLES.get(agg, "-"),
             marker=AGG_MARKERS.get(agg),
             markevery=markevery,
@@ -416,11 +435,34 @@ def plot_condition(
             linewidth=1.8,
         )
 
+        # For diverged cells, mark the last finite point with a red X and annotate.
+        if mode == "absolute" and diverged and steps:
+            last_step, last_loss = steps[-1], losses[-1]
+            ax.plot(last_step, last_loss, marker="x", markersize=10,
+                    markeredgewidth=2.5, color="red", zorder=5, linestyle="none",
+                    label="_nolegend_")
+            ax.annotate(
+                "diverged (NaN)",
+                xy=(last_step, last_loss),
+                xytext=(8, 4), textcoords="offset points",
+                fontsize=7, color="red",
+            )
+
     if mode == "residual":
         ax.axhline(0, color="grey", lw=0.8, ls="--")
         ax.set_ylabel("Loss − mean (Δ)")
     else:
-        ax.set_ylabel("Loss (mean across workers)")
+        # Auto log-scale when the finite range spans more than 20×
+        # (e.g. robust ~5 vs diverging mean ~2730 on magnitude attack).
+        if all_finite_losses:
+            lo, hi = min(all_finite_losses), max(all_finite_losses)
+            if lo > 0 and hi / lo > 20:
+                ax.set_yscale("log")
+                ax.set_ylabel("Loss (mean across workers, log scale)")
+            else:
+                ax.set_ylabel("Loss (mean across workers)")
+        else:
+            ax.set_ylabel("Loss (mean across workers)")
 
     ax.set_xlabel("Outer step")
     ax.legend(fontsize=8, loc="upper right")
