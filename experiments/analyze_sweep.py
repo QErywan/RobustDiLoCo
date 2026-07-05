@@ -318,6 +318,15 @@ def _get_matplotlib():
         return None
 
 
+def _cell_diverged(cell: dict) -> bool:
+    """Return True if any history entry has a non-finite (or None) loss/mean."""
+    for h in cell.get("history", []):
+        v = h.get("loss/mean")
+        if v is None or not math.isfinite(v):
+            return True
+    return False
+
+
 def plot_condition(
     cells: list[dict],
     perturbation: str,
@@ -326,6 +335,7 @@ def plot_condition(
     out_path: Path,
     title: str | None = None,
     mode: str = "absolute",
+    exclude_diverged: bool = False,
 ) -> bool:
     """
     Plot loss-vs-step curves for all aggregators present in a given condition,
@@ -340,6 +350,13 @@ def plot_condition(
                       band.  Alignment is by outer_step, not by index, so partial
                       runs (different lengths) are handled correctly.  Returns False
                       if no mean cell is present or if mean losses are all NaN.
+    exclude_diverged : bool
+        When True (absolute mode only), filter out any cell whose history contains
+        a non-finite loss/mean before plotting.  If *no* cell in the condition
+        diverged, returns False without writing a file — so ``_robust.png`` twins
+        only appear where they add value (i.e. where mean blew up).  A note listing
+        the excluded aggregator names is appended to the plot title so the output is
+        self-documenting.
 
     In both modes each aggregator gets a distinct linestyle + sparse marker
     (AGG_LINESTYLES / AGG_MARKERS) so lines remain distinguishable even where
@@ -359,6 +376,20 @@ def plot_condition(
     ]
     if not matching:
         return False
+
+    # ------------------------------------------------------------------
+    # Robust-only filter: drop cells whose history contains any NaN/inf.
+    # Only applies in absolute mode; residual mode already excludes mean.
+    # ------------------------------------------------------------------
+    if exclude_diverged and mode == "absolute":
+        diverged_aggs = [c["aggregator"] for c in matching if _cell_diverged(c)]
+        if not diverged_aggs:
+            # Nothing diverged in this condition — the robust plot is identical
+            # to the normal plot, so skip it to avoid a redundant duplicate.
+            return False
+        matching = [c for c in matching if not _cell_diverged(c)]
+        if not matching:
+            return False
 
     # ------------------------------------------------------------------
     # Residual mode: build a step→loss lookup from the mean cell
@@ -472,6 +503,10 @@ def plot_condition(
         title = f"pert={perturbation}  f={byzantine_f}  sev={severity}"
     if mode == "residual":
         title += "  [residual vs mean]"
+    if exclude_diverged and mode == "absolute":
+        # diverged_aggs is always defined here (we returned False if empty above)
+        dropped = ", ".join(diverged_aggs)  # noqa: F821 — set in filter block above
+        title += f"\n[robust only — excluded: {dropped}]"
     ax.set_title(title, fontsize=10)
 
     fig.tight_layout()
@@ -631,6 +666,19 @@ def main():
                 title=f"{pert}  f={f}  severity={sev}  [residual vs mean]",
                 mode="residual",
             )
+        # Robust-only twin: drops any diverged aggregator so the surviving curves
+        # are readable on a linear axis.  plot_condition returns False (no file
+        # written) if nothing in this condition diverged, so this is a no-op for
+        # clean / dropout conditions — only magnitude / gaussian get the extra plot.
+        plot_condition(
+            cells,
+            perturbation=pert,
+            byzantine_f=f,
+            severity=sev,
+            out_path=out_dir / fname.replace(".png", "_robust.png"),
+            title=f"{pert}  f={f}  severity={sev}",
+            exclude_diverged=True,
+        )
 
     print(f"\n[analyze] Done. Outputs in {out_dir}")
 

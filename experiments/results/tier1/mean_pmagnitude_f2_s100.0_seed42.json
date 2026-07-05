@@ -1,0 +1,976 @@
+{
+  "config": {
+    "hparams": "hparams/sim/sim_model_hparams_gpt2_small.json",
+    "n_workers": 8,
+    "H": 500,
+    "batch_size": 4,
+    "seq_len": 1024,
+    "outer_steps": 50,
+    "aggregator": "mean",
+    "perturbation": "magnitude",
+    "byzantine_f": 2,
+    "severity": 100.0,
+    "seed": 42,
+    "dataset": "c4",
+    "device": "cuda"
+  },
+  "history": [
+    {
+      "outer_step": 1,
+      "loss/mean": 7.1118165543079375,
+      "loss/min": 7.051833605766296,
+      "loss/max": 7.175877182960511,
+      "pseudo_grad_norm/mean": 286.6780014038086,
+      "pseudo_grad_norm/max": 289.2172546386719,
+      "aggregated_grad_norm": 7008.27294921875,
+      "worker_losses": [
+        7.051833605766296,
+        7.128612790107727,
+        7.083791982650757,
+        7.11476937007904,
+        7.156231772422791,
+        7.1136769800186155,
+        7.175877182960511,
+        7.069738750457764
+      ]
+    },
+    {
+      "outer_step": 2,
+      "loss/mean": 18.899975436329843,
+      "loss/min": 18.44064500427246,
+      "loss/max": 19.17036852836609,
+      "pseudo_grad_norm/mean": 338.2161102294922,
+      "pseudo_grad_norm/max": 341.2074890136719,
+      "aggregated_grad_norm": 8612.1552734375,
+      "worker_losses": [
+        18.899446336746216,
+        18.61812651348114,
+        19.17036852836609,
+        19.055925126075746,
+        18.992362473487855,
+        18.92938671398163,
+        18.44064500427246,
+        19.0935427942276
+      ]
+    },
+    {
+      "outer_step": 3,
+      "loss/mean": 34.37764880621433,
+      "loss/min": 34.106075849533084,
+      "loss/max": 34.55184162712097,
+      "pseudo_grad_norm/mean": 345.3863639831543,
+      "pseudo_grad_norm/max": 347.52880859375,
+      "aggregated_grad_norm": 8863.4951171875,
+      "worker_losses": [
+        34.106075849533084,
+        34.35895907115936,
+        34.4209350938797,
+        34.15560749149323,
+        34.55184162712097,
+        34.53152290534973,
+        34.527795316696164,
+        34.36845309448242
+      ]
+    },
+    {
+      "outer_step": 4,
+      "loss/mean": 2730.443537414551,
+      "loss/min": 2729.557056640625,
+      "loss/max": 2732.4493908691406,
+      "pseudo_grad_norm/mean": 641.6318740844727,
+      "pseudo_grad_norm/max": 643.0698852539062,
+      "aggregated_grad_norm": 16517.501953125,
+      "worker_losses": [
+        2729.6781875,
+        2731.1153466796877,
+        2729.557056640625,
+        2731.0570029296873,
+        2732.4493908691406,
+        2729.5744216308594,
+        2730.5290971679688,
+        2729.5877958984374
+      ]
+    },
+    {
+      "outer_step": 5,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 6,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 7,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 8,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 9,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 10,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 11,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 12,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 13,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 14,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 15,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 16,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 17,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 18,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 19,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 20,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 21,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 22,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 23,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 24,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 25,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 26,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 27,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 28,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 29,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 30,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 31,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 32,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 33,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 34,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 35,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 36,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 37,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 38,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 39,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 40,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 41,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 42,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 43,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 44,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 45,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 46,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 47,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 48,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 49,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    },
+    {
+      "outer_step": 50,
+      "loss/mean": NaN,
+      "loss/min": NaN,
+      "loss/max": NaN,
+      "pseudo_grad_norm/mean": NaN,
+      "pseudo_grad_norm/max": NaN,
+      "aggregated_grad_norm": NaN,
+      "worker_losses": [
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    }
+  ],
+  "eval": {
+    "eval_loss": NaN,
+    "perplexity": NaN,
+    "n_tokens": 204800,
+    "n_batches": 50
+  },
+  "downstream": {}
+}
