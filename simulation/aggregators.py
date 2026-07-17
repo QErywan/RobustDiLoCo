@@ -243,10 +243,13 @@ class MultiKrumAggregator:
         n = len(pseudo_grads)
         stacked = torch.stack(pseudo_grads)   # (n, d)
 
-        # Pairwise squared L2 distances (n, n):
-        #   sq_dists[i, j] = ||g_i - g_j||^2
-        diffs = stacked.unsqueeze(0) - stacked.unsqueeze(1)   # (n, n, d)
-        sq_dists = (diffs ** 2).sum(dim=-1)                    # (n, n)
+        # Pairwise squared L2 distances (n, n) via expansion identity:
+        #   ||g_i - g_j||^2 = ||g_i||^2 + ||g_j||^2 - 2 * g_i . g_j
+        # Avoids the (n, n, d) intermediate that OOMs at d=30M+ parameters.
+        norms_sq = (stacked ** 2).sum(dim=1)                            # (n,)
+        sq_dists = (norms_sq.unsqueeze(1) + norms_sq.unsqueeze(0)
+                    - 2.0 * (stacked @ stacked.T))                      # (n, n)
+        sq_dists.clamp_(min=0.0)                                        # fp rounding guard
 
         # Zero out the diagonal (self-distance) by setting it to inf so it is
         # never selected as a nearest neighbour.
