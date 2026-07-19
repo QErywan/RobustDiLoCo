@@ -7,6 +7,8 @@ directly. This avoids slow training loops and keeps tests in milliseconds.
 """
 
 import json
+import subprocess
+import sys
 import torch
 import pytest
 from pathlib import Path
@@ -218,9 +220,6 @@ class TestMetricComputation:
 # Driver smoke test
 # ---------------------------------------------------------------------------
 
-import subprocess
-import sys
-
 class TestDriverSmoke:
     def test_smoke_creates_output_files(self, tmp_path):
         """
@@ -236,7 +235,7 @@ class TestDriverSmoke:
             ],
             capture_output=True,
             text=True,
-            cwd="/Users/qerywan/Developer/Imperial/SparseLoCo",
+            cwd=str(Path(__file__).resolve().parent.parent),
         )
         assert result.returncode == 0, (
             f"Driver exited with {result.returncode}\n"

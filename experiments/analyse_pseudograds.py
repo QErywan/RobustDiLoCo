@@ -184,24 +184,26 @@ def plot_norms(all_metrics: dict[str, list[dict]], out_dir: Path) -> None:
 
 def plot_cohesion_oracle(all_metrics: dict[str, list[dict]], out_dir: Path) -> None:
     """Figure 2: honest cohesion (top) + cosine-to-oracle (bottom)."""
+    (out_dir / "plots").mkdir(parents=True, exist_ok=True)
     fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
 
-    # Top panel: honest cluster cohesion for RFA (representative)
-    rfa_metrics = all_metrics["rfa"]
-    steps = [m["outer_step"] for m in rfa_metrics]
+    # Use RFA for the top panel (representative); fall back to first available
+    rep_name = "rfa" if "rfa" in all_metrics else next(iter(all_metrics))
+    rep_metrics = all_metrics[rep_name]
+    steps = [m["outer_step"] for m in rep_metrics]
     ax_top.plot(
-        steps, [m["honest_cosine_sim"] for m in rfa_metrics],
-        color="steelblue", linewidth=2, label="honest worker cosine sim (RFA)"
+        steps, [m["honest_cosine_sim"] for m in rep_metrics],
+        color="steelblue", linewidth=2, label=f"honest worker cosine sim ({rep_name})"
     )
     ax_top.plot(
-        steps, [m["byzantine_cosine_sim"] for m in rfa_metrics],
+        steps, [m["byzantine_cosine_sim"] for m in rep_metrics],
         color="firebrick", linestyle="--", linewidth=2,
-        label="Byzantine cosine to oracle (RFA)"
+        label=f"Byzantine cosine to oracle ({rep_name})"
     )
     ax_top.set_ylabel("cosine similarity")
     ax_top.set_title(
-        "Cluster cohesion at H=500 — honest workers converge in direction\n"
-        "(pre-perturbation, RFA run shown as representative)"
+        f"Cluster cohesion at H=500 — honest workers converge in direction\n"
+        f"(pre-perturbation, {rep_name} run shown as representative)"
     )
     ax_top.legend(fontsize=9)
     ax_top.set_ylim(-0.1, 1.1)
@@ -235,6 +237,7 @@ def plot_pca_snapshots(
     steps: list[int] | None = None,
 ) -> None:
     """Figure 3: 5×2 PCA scatter (one row per aggregator, columns = step 1 and step 25)."""
+    (out_dir / "plots").mkdir(parents=True, exist_ok=True)
     if steps is None:
         steps = [1, 25]
     agg_names = list(all_metrics.keys())
@@ -302,6 +305,8 @@ def plot_all(out_dir: Path) -> None:
     all_metrics: dict[str, list[dict]] = {}
     for agg_name in AGGREGATORS:
         path = out_dir / f"metrics_{agg_name}.json"
+        if not path.exists():
+            continue
         with open(path) as f:
             all_metrics[agg_name] = json.load(f)
 
