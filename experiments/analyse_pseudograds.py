@@ -153,7 +153,8 @@ def make_loaders(
 def plot_norms(all_metrics: dict[str, list[dict]], out_dir: Path) -> None:
     """Figure 1: 1×5 subplots of per-worker norm trajectories."""
     n_honest = N_WORKERS - BYZANTINE_F
-    fig, axes = plt.subplots(1, 5, figsize=(20, 4), sharey=True)
+    n_aggs = len(all_metrics)
+    fig, axes = plt.subplots(1, n_aggs, figsize=(4 * n_aggs, 4), sharey=True)
 
     for ax, (agg_name, metrics) in zip(axes, all_metrics.items()):
         steps = [m["outer_step"] for m in metrics]
@@ -368,7 +369,9 @@ def run(args):
     vocab_size = initial_model.config.vocab_size
     print(f"Model: {counts['total'] / 1e6:.1f}M params\n")
 
-    # Build dataloaders once — workers reuse them across aggregator runs
+    # Build dataloaders once. Each aggregator run gets fresh Worker iterators
+    # (Worker.__init__ calls iter(dataloader)), so batch order differs per run.
+    # Initial model weights are the controlled variable across comparisons.
     loaders = make_loaders(
         n_workers=N_WORKERS,
         vocab_size=vocab_size,
