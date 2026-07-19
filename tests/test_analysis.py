@@ -212,3 +212,39 @@ class TestMetricComputation:
         aggregated = torch.stack(grads).mean(dim=0)
         metrics = sim._collect_metrics(grads, grads, aggregated, step=1)
         assert metrics["byzantine_cosine_sim"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Driver smoke test
+# ---------------------------------------------------------------------------
+
+import subprocess
+import sys
+
+class TestDriverSmoke:
+    def test_smoke_creates_output_files(self, tmp_path):
+        """
+        Run the driver in smoke mode (tiny model, H=2, 3 outer steps, 2 inner steps)
+        and verify all expected output files exist.
+        """
+        result = subprocess.run(
+            [
+                sys.executable,
+                "experiments/analyse_pseudograds.py",
+                "--smoke",
+                "--out-dir", str(tmp_path),
+            ],
+            capture_output=True,
+            text=True,
+            cwd="/Users/qerywan/Developer/Imperial/SparseLoCo",
+        )
+        assert result.returncode == 0, (
+            f"Driver exited with {result.returncode}\n"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+        for agg_name in ["mean", "trimmed", "median", "rfa", "krum"]:
+            assert (tmp_path / f"metrics_{agg_name}.json").exists(), \
+                f"Missing metrics_{agg_name}.json"
+        for fig in ["fig1_norms.png", "fig2_cohesion_oracle.png", "fig3_pca_snapshots.png"]:
+            assert (tmp_path / "plots" / fig).exists(), f"Missing {fig}"
