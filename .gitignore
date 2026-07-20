@@ -50,3 +50,8 @@ wandb
 lm-evaluation-harness/
 models/
 checkpoints/
+
+.superpowers
+.Claude
+.pytest*
+docs/superpowers

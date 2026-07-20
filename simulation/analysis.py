@@ -87,7 +87,9 @@ class InstrumentedSimulation(Simulation):
                 w.model.to(w.device)
             m = w.inner_step(steps=self.config.H)
             worker_metrics.append(m)
-            pseudo_grads_before.append(w.compute_pseudo_grad())
+            # Move to CPU immediately so all 8 pseudo-grad vectors never live
+            # on the GPU at once (each is ~500 MB for a 124M-param model).
+            pseudo_grads_before.append(w.compute_pseudo_grad().cpu())
             if self.config.offload_between_steps:
                 w.model.to("cpu")
 

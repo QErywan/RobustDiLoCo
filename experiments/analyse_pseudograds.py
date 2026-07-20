@@ -386,10 +386,13 @@ def run(args):
 
         # Fresh model copy so each aggregator starts from identical weights
         model_copy = copy.deepcopy(initial_model)
+        # Always offload during full runs: 8 workers × AdamW states ≈ 12 GB,
+        # which exceeds the 4080. Offload keeps at most one worker on GPU.
+        use_offload = args.offload or (not args.smoke)
         sim_config = SimConfig(
             H=cfg["H"],
             device=args.device,
-            offload_between_steps=args.offload,
+            offload_between_steps=use_offload,
             verbose=False,
         )
         workers = [
