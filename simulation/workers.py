@@ -182,7 +182,7 @@ class Worker:
             p.grad = (
                 aggregated_grad[offset : offset + numel]
                 .view(p.shape)
-                .to(dtype=p.dtype)
+                .to(device=p.device, dtype=p.dtype)
                 .clone()
             )
             offset += numel
@@ -193,6 +193,23 @@ class Worker:
     # ------------------------------------------------------------------
     # Inspection helpers
     # ------------------------------------------------------------------
+
+    def offload_to(self, device) -> None:
+        """
+        Move model + both optimizer state dicts to `device`.
+
+        w.model.to(device) alone is insufficient: AdamW/SGD state tensors
+        (m, v, momentum buffers) are created on whichever device the parameters
+        are on at the time of the first .step() call, and are NOT moved by
+        model.to().  Without this helper, all 8 workers' AdamW states accumulate
+        on GPU after the first outer step (~8 GB), defeating offload entirely.
+        """
+        self.model.to(device)
+        for optim in (self.inner_optimizer, self.outer_optimizer):
+            for state in optim.state.values():
+                for k, v in state.items():
+                    if isinstance(v, torch.Tensor):
+                        state[k] = v.to(device)
 
     def grad_norm(self) -> float:
         """L2 norm of current parameter gradients (after outer update)."""
@@ -240,12 +257,12 @@ class Simulation:
             if self.config.verbose:
                 print(f"  outer {self.outer_step_count + 1} | worker {w.rank}/{len(self.workers) - 1}", flush=True)
             if self.config.offload_between_steps:
-                w.model.to(w.device)
+                w.offload_to(w.device)
             m = w.inner_step(steps=self.config.H)
             worker_metrics.append(m)
             pseudo_grads.append(w.compute_pseudo_grad())
             if self.config.offload_between_steps:
-                w.model.to("cpu")
+                w.offload_to("cpu")
 
         # 2. Collect pseudo-gradients — one flat tensor per worker (already done above if offloading)
 
@@ -261,10 +278,10 @@ class Simulation:
         # 5. Apply outer update to all workers
         for w in self.workers:
             if self.config.offload_between_steps:
-                w.model.to(w.device)
+                w.offload_to(w.device)
             w.apply_outer_update(aggregated)
             if self.config.offload_between_steps:
-                w.model.to("cpu")
+                w.offload_to("cpu")
 
         self.outer_step_count += 1
 

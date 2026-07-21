@@ -84,14 +84,14 @@ class InstrumentedSimulation(Simulation):
                     flush=True,
                 )
             if self.config.offload_between_steps:
-                w.model.to(w.device)
+                w.offload_to(w.device)
             m = w.inner_step(steps=self.config.H)
             worker_metrics.append(m)
             # Move to CPU immediately so all 8 pseudo-grad vectors never live
             # on the GPU at once (each is ~500 MB for a 124M-param model).
             pseudo_grads_before.append(w.compute_pseudo_grad().cpu())
             if self.config.offload_between_steps:
-                w.model.to("cpu")
+                w.offload_to("cpu")
 
         # --- Perturbation ---
         pseudo_grads_after = self.perturbation.apply(pseudo_grads_before)
@@ -119,10 +119,10 @@ class InstrumentedSimulation(Simulation):
         # --- Outer updates (replicate parent's offload logic) ---
         for w in self.workers:
             if self.config.offload_between_steps:
-                w.model.to(w.device)
+                w.offload_to(w.device)
             w.apply_outer_update(aggregated)
             if self.config.offload_between_steps:
-                w.model.to("cpu")
+                w.offload_to("cpu")
 
         self.outer_step_count += 1
 
