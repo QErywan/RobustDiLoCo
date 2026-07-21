@@ -210,6 +210,8 @@ class Worker:
                 for k, v in state.items():
                     if isinstance(v, torch.Tensor):
                         state[k] = v.to(device)
+        if self._snapshot is not None:
+            self._snapshot = [s.to(device) for s in self._snapshot]
 
     def grad_norm(self) -> float:
         """L2 norm of current parameter gradients (after outer update)."""
