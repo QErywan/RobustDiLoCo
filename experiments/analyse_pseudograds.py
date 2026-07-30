@@ -83,7 +83,12 @@ SMOKE_CFG = dict(
 )
 
 FULL_CFG = dict(
-    hparams="hparams/sim/sim_model_hparams_nanogpt.json",
+    # 30M GPT-2 (same scale + seq_len Tier-1 already uses, sweep.py TIER_HPARAMS[1]),
+    # not the 124M nanogpt config: 8 workers x (124M model + AdamW + SGD state) sits
+    # right at ~16-20GB host RAM, which earlyoom (-m 25 -s 25) kills on sight on the
+    # 31GB Titan Xp node. n_workers/f/H/outer_steps/seq_len are unchanged since those
+    # define the H=500 regime under study; only model size was the safe lever.
+    hparams="hparams/sim/sim_model_hparams_gpt2_small.json",
     H=500,
     outer_steps=50,
     batch_size=8,
