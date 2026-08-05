@@ -267,12 +267,28 @@ def run_sweep(args: argparse.Namespace) -> None:
     if args.only_aggregator:
         cells = [c for c in cells if c.aggregator == args.only_aggregator]
 
-    # Filter out hetero cells if the loader is not yet ready (pending TODO)
-    hetero_pending = [c for c in cells if c.perturbation == "hetero"]
-    cells = [c for c in cells if c.perturbation != "hetero"]
-    if hetero_pending:
-        print(f"[sweep] NOTE: {len(hetero_pending)} hetero cells skipped — "
-              "HeterogeneousData loader not yet wired into run_experiment.py.")
+    # Multi-Krum is mathematically undefined when 2f+2 >= n (it needs 2f+2 < n to have
+    # enough non-Byzantine neighbours to score). At n=8 that rules out f=4. These cells
+    # can't be computed — attempting them only wastes compute (they OOM). Skip them here
+    # so `--only-aggregator krum` never re-dispatches them. Documented as a limitation.
+    n_workers_default = 8
+    def _krum_undefined(c):
+        return c.aggregator == "krum" and 2 * c.byzantine_f + 2 >= n_workers_default
+    undefined_fs = sorted({c.byzantine_f for c in cells if _krum_undefined(c)})
+    if undefined_fs:
+        before = len(cells)
+        cells = [c for c in cells if not _krum_undefined(c)]
+        print(f"[sweep] NOTE: {before - len(cells)} krum cell(s) skipped — undefined at "
+              f"f={undefined_fs} (2f+2 >= n={n_workers_default}).")
+
+    # Hetero cells are now supported (data-level Dirichlet-alpha split; see
+    # simulation/hetero_data.py + run_experiment.py). They require a cluster_ids.npy
+    # cache from experiments/cluster_shards.py alongside the shards; without it the
+    # runner falls back to random cluster ids (smoke only) and warns.
+    n_hetero = sum(1 for c in cells if c.perturbation == "hetero")
+    if n_hetero:
+        print(f"[sweep] NOTE: {n_hetero} hetero cells included — ensure "
+              "cluster_ids.npy exists next to the shards (run cluster_shards.py first).")
 
     n_total = len(cells)
     n_skip = sum(1 for c in cells if c.result_path.exists())

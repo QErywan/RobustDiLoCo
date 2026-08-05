@@ -108,7 +108,7 @@ FULL = dict(
 # ---------------------------------------------------------------------------
 
 AGGREGATOR_CHOICES = ["mean", "trimmed", "median", "rfa", "krum"]
-PERTURBATION_CHOICES = ["none", "dropout", "gaussian", "magnitude"]
+PERTURBATION_CHOICES = ["none", "dropout", "gaussian", "magnitude", "hetero"]
 
 
 def build_aggregator(name: str, f: int, n_workers: int):
@@ -149,6 +149,11 @@ def build_perturbation(name: str, f: int, severity: float, n_workers: int):
         n_workers: total workers
     """
     if name == "none":
+        return NoPerturbation()
+    elif name == "hetero":
+        # Data-level perturbation: the non-IID split IS the perturbation, applied at
+        # loader construction (see make_worker_loaders partition="hetero"). The gradient
+        # hook is a pass-through here — no Byzantine worker (f=0).
         return NoPerturbation()
     elif name == "dropout":
         return WorkerDropout(n_workers=n_workers, f=f)
@@ -256,6 +261,11 @@ def parse_args():
                    choices=["synthetic", "c4", "fineweb"])
     p.add_argument("--data-path",  type=str, default=None,
                    help="Path to pre-tokenized .npy shards (synthetic mode only)")
+    p.add_argument("--cluster-ids-path", type=str, default=None,
+                   help="hetero only: path to cluster_ids.npy from cluster_shards.py "
+                        "(default: <data-path>/cluster_ids.npy if it exists)")
+    p.add_argument("--n-clusters", type=int, default=10,
+                   help="hetero only: number of feature clusters (pseudo-labels)")
 
     # Aggregator + perturbation (the thesis variables)
     p.add_argument("--aggregator",    type=str, default="mean",
@@ -350,7 +360,14 @@ def run(args):
     vocab_size = model.config.vocab_size
     print(f"Model: {counts['total'] / 1e6:.1f}M params  vocab={vocab_size}")
 
-    # Per-worker dataloaders
+    # Per-worker dataloaders. For the hetero perturbation, severity carries the
+    # Dirichlet alpha and the loader builds a non-IID split (see make_worker_loaders).
+    is_hetero = args.perturbation == "hetero"
+    cluster_ids_path = args.cluster_ids_path
+    if is_hetero and cluster_ids_path is None and args.data_path is not None:
+        # Convention: cluster_ids.npy sits next to the shards unless overridden.
+        default_cids = str(Path(args.data_path) / "cluster_ids.npy")
+        cluster_ids_path = default_cids if Path(default_cids).exists() else None
     loaders = make_worker_loaders(
         n_workers=cfg["n_workers"],
         vocab_size=vocab_size,
@@ -359,6 +376,11 @@ def run(args):
         dataset=args.dataset,
         data_path=args.data_path,
         device=args.device,
+        partition="hetero" if is_hetero else "iid",
+        alpha=args.severity if is_hetero else None,
+        seed=args.seed,
+        cluster_ids_path=cluster_ids_path,
+        n_clusters=args.n_clusters,
     )
 
     # Aggregator + perturbation — never hardcoded, always from args

@@ -113,16 +113,64 @@ def make_worker_loaders(
     dataset: str,
     data_path: str | None,
     device: str,
+    partition: str = "iid",
+    alpha: float | None = None,
+    seed: int = 42,
+    cluster_ids_path: str | None = None,
+    n_clusters: int = 10,
 ) -> list[DataLoader]:
     """One DataLoader per worker.
 
     Routing priority:
+        0. partition == "hetero" → non-IID Dirichlet(alpha) split over feature clusters
+           (the data-level "hetero" perturbation). Loads the whole token stream once and
+           repartitions it by cluster; see simulation/hetero_data.py.
         1. --data-path given → pre-tokenized ShadedDataset (fastest; pipeline
            consistency requires ALL cells in a reported sweep to use this path).
         2. dataset in {"c4", "fineweb"} and no data-path → HFStreamingDataset
            (slow: tokenizes on the fly; use only for smoke tests or profiling).
         3. Fallback → SyntheticDataset (random tokens; smoke tests only).
     """
+    if partition == "hetero":
+        from simulation.hetero_data import (
+            partition_blocks_to_loaders, load_or_make_cluster_ids, tokens_to_blocks,
+        )
+        if alpha is None:
+            raise ValueError("partition='hetero' requires alpha (Dirichlet concentration)")
+
+        # Load the full token stream ONCE (world_size=1 reuses upstream ShadedDataset
+        # unmodified), then repartition by cluster.
+        if data_path is not None:
+            meta = _load_shard_meta(data_path)
+            print(f"[data] hetero: loading full stream from {data_path} "
+                  f"({meta['n_train_tokens']/1e6:.0f}M tokens) for Dirichlet(alpha={alpha}) split")
+            full = ShadedDataset(
+                shards_path=data_path,
+                token_budget=meta["n_train_tokens"],
+                sequence_length=seq_len,
+                rank=0, world_size=1,
+                device=torch.device(device),
+                shard_token_size=meta["tokens_per_shard"],
+                split="train",
+            )
+            tokens = full.worker_tokens
+        else:
+            # Synthetic stream — smoke/plumbing only. Enough blocks for the min-per-worker guard.
+            n_tokens = max(n_workers * 2000, 16000) * seq_len
+            print(f"[data] hetero: SYNTHETIC token stream ({n_tokens/1e6:.1f}M) — smoke only")
+            tokens = torch.randint(0, vocab_size, (n_tokens,), dtype=torch.long)
+
+        blocks = tokens_to_blocks(tokens, seq_len)
+        cluster_ids = load_or_make_cluster_ids(
+            n_blocks=blocks.shape[0],
+            cluster_ids_path=cluster_ids_path,
+            n_clusters=n_clusters,
+            seed=seed,
+        )
+        return partition_blocks_to_loaders(
+            blocks, cluster_ids, n_workers, batch_size, alpha=alpha, seed=seed,
+        )
+
     if data_path is not None:
         # Pre-tokenized shards — fastest path.
         # Read meta.json for exact token counts so ShadedDataset slices correctly.
