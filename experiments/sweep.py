@@ -161,39 +161,54 @@ def _tier1_cells(seed: int = PRIMARY_SEED) -> list[Cell]:
 
 def _tier2_cells() -> list[Cell]:
     """
-    Tier-2 validation cells — chosen after Tier-1 analysis.
+    Tier-2 validation cells — the DECISIVE conditions from the Tier-1 analysis.
 
-    Populate this list after reviewing Tier-1 results and identifying:
-      - Which aggregators are clearly superior/inferior
-      - Which perturbation × f conditions are the most decisive
+    Tier-2 (134M) exists to show the Tier-1 ranking HOLDS AT SCALE, not to reproduce
+    the whole grid. The cells below are exactly the conditions where aggregators
+    separated in Tier-1, chosen to demonstrate each scientific claim once:
 
-    Placeholder: currently includes the five clean-baseline cells × 3 seeds
-    plus one representative perturbed cell × 3 seeds per perturbation type.
-    Update after Tier-1 analysis.
+      - clean f=0                : sanity — all aggregators converge to ~same loss
+      - magnitude f=2 s=10       : THE headline — mean diverges, robust hold (RFA best)
+      - dropout  f=4             : the perturbation-dependence mirror — RFA is *worst*
+      - magnitude f=4 s=10       : where the robust aggregators separate from each other
+
+    Seeds follow the supervisor's steer ("more seeds on fewer cells"): 3 seeds on the
+    headline magnitude cell (for effect-size error bars), 1 seed on the supporting
+    decisive cells. Krum at f=4 is auto-skipped by the 2f+2>=n guard in run_sweep.
+
+    Compute note: run these with `--outer-steps 50` on GCP. 50 steps is enough to show
+    the ranking (Tier-1 used 50); the full 150 is only needed for converged headline
+    perplexity, which is out of the minimal-Tier-2 budget. Optional stretch cells
+    (gaussian f=2 s=1.0; +seeds on dropout f=4) can be appended if compute allows.
     """
     cells = []
-    seeds = [42, 1, 2]   # 3 seeds for effect-size error bars
+    headline_seeds = [42, 1, 2]   # 3 seeds on the headline for error bars
+    SINGLE = 42                    # 1 seed for sanity + supporting decisive cells
 
-    # Clean baseline — all 5 aggregators × 3 seeds
+    # 1. Clean baseline (sanity at 134M) — all aggregators, 1 seed.
     for agg in AGGREGATORS:
-        for seed in seeds:
-            cells.append(Cell(agg, "none", 0, 0.0, seed, 2))
+        cells.append(Cell(agg, "none", 0, 0.0, SINGLE, 2))
 
-    # Representative perturbed cells — update after Tier-1 analysis
-    # Magnitude attack f=2 scale=100 (mid-range, expected decisive)
+    # 2. HEADLINE — magnitude attack f=2 s=10: mean diverges, robust hold. 3 seeds.
     for agg in AGGREGATORS:
-        for seed in seeds:
-            cells.append(Cell(agg, "magnitude", 2, 100.0, seed, 2))
+        for seed in headline_seeds:
+            cells.append(Cell(agg, "magnitude", 2, 10.0, seed, 2))
 
-    # Gaussian noise f=2 sigma=0.5 (mid-range)
+    # 3. Dropout f=4 — perturbation-dependence mirror (RFA worst). 1 seed.
+    #    (krum auto-skipped: undefined at f=4)
     for agg in AGGREGATORS:
-        for seed in seeds:
-            cells.append(Cell(agg, "gaussian", 2, 0.5, seed, 2))
+        cells.append(Cell(agg, "dropout", 4, 0.0, SINGLE, 2))
 
-    # Worker dropout f=2
+    # 4. Magnitude f=4 s=10 — robust-vs-robust separation. 1 seed. (krum auto-skipped)
     for agg in AGGREGATORS:
-        for seed in seeds:
-            cells.append(Cell(agg, "dropout", 2, 0.0, seed, 2))
+        cells.append(Cell(agg, "magnitude", 4, 10.0, SINGLE, 2))
+
+    # --- optional stretch (uncomment if the timed pilot shows budget headroom) ---
+    # for agg in AGGREGATORS:                                   # gaussian natural pert.
+    #     cells.append(Cell(agg, "gaussian", 2, 1.0, SINGLE, 2))
+    # for agg in AGGREGATORS:                                   # +2 seeds on the mirror
+    #     for seed in [1, 2]:
+    #         cells.append(Cell(agg, "dropout", 4, 0.0, seed, 2))
 
     return cells
 
