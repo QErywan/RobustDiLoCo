@@ -156,6 +156,117 @@ def load_cells(results_dir: str | Path) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Failure classification (per-aggregator)
+# ---------------------------------------------------------------------------
+
+# Perplexity at/above this (or NaN/inf) means the run produced no usable model.
+# Clean baseline is ~139; the f4 eval-collapse was ~2.9e9. 1e6 is a safe cut.
+DIVERGENCE_PPL = 1e6
+
+
+def _is_diverged_ppl(ppl) -> bool:
+    """True if perplexity signals numerical divergence (NaN, inf, or absurdly large)."""
+    if ppl is None:
+        return False
+    try:
+        return math.isnan(ppl) or math.isinf(ppl) or ppl > DIVERGENCE_PPL
+    except TypeError:
+        return False
+
+
+def classify_failure(cell: dict, expected_steps: int):
+    """
+    Decide whether a loaded cell FAILED, and why. Returns (category, reason, source)
+    or None if the cell completed cleanly.
+
+    Crucially, this does NOT rely on an explicit status/error block — legacy JSONs
+    written before error-saving have neither, so failure is *inferred* from n_steps,
+    eval presence, and perplexity. Every verdict is tagged:
+        source = "recorded"  → the run logged an explicit error/status
+        source = "inferred"  → derived from the data (legacy file, or a silent stop)
+
+    Categories:
+        crashed   — an exception was recorded (or a legacy file stopped with no result)
+        diverged  — ran to completion but ppl is NaN/inf/huge. For THIS thesis that is
+                    frequently the *finding* (mean under attack), NOT a bug to re-run.
+        no-eval   — full steps but perplexity never written (eval interrupted)
+        short     — fewer steps than the cohort, no error block (interrupted mid-run)
+    """
+    status = cell.get("status")
+    error = cell.get("error")
+    n_steps = cell["n_steps"]
+    ppl = cell["perplexity"]
+
+    # 1. Explicitly recorded crash — has a status=crashed and/or an error block.
+    if status == "crashed" or error:
+        err = error or {}
+        etype = err.get("type", "?")
+        msg = (err.get("message") or "")[:100]
+        step = err.get("failed_at_step", "?")
+        oom = "  [CUDA OOM]" if err.get("oom") else ""
+        return ("crashed", f"{etype}: {msg} (at step {step}){oom}", "recorded")
+
+    # 2. Numerical divergence — completed but produced no usable model.
+    if _is_diverged_ppl(ppl):
+        ppl_str = "NaN/inf" if (math.isnan(ppl) or math.isinf(ppl)) else f"{ppl:.3g}"
+        return ("diverged", f"perplexity={ppl_str} after {n_steps} steps", "inferred")
+
+    # 3. Ran the full length but was never scored (eval step missing/interrupted).
+    if n_steps >= expected_steps and ppl is None:
+        return ("no-eval", f"{n_steps} steps but no perplexity written", "inferred")
+
+    # 4. Stopped short with no recorded error — interrupted / legacy silent stop.
+    if 0 <= n_steps < expected_steps:
+        return ("short", f"only {n_steps}/{expected_steps} steps, no error block", "inferred")
+
+    return None
+
+
+def failure_report(cells: list[dict], expected_steps: int) -> None:
+    """
+    Print, grouped by aggregator, which experiments failed and the inferred reason.
+    Supersedes a plain crashed-list: also catches diverged / no-eval / short cells,
+    including legacy JSONs that predate the error-saving feature.
+    """
+    from collections import defaultdict
+
+    by_agg: dict[str, list] = defaultdict(list)
+    for c in cells:
+        verdict = classify_failure(c, expected_steps)
+        if verdict:
+            cat, reason, source = verdict
+            by_agg[c["aggregator"]].append((c["cell_id"], cat, reason, source))
+
+    print("\n" + "=" * 64)
+    print("PER-AGGREGATOR FAILURE REPORT")
+    print("  crashed=no result · diverged=NaN/inf/huge ppl (often a finding, not a bug)")
+    print("  no-eval=ran but unscored · short=interrupted")
+    print("  [recorded]=run logged the error · [inferred]=derived (legacy/silent stop)")
+    print("=" * 64)
+
+    if not by_agg:
+        print("  no failures detected — every cell completed with a finite perplexity.")
+        print("=" * 64)
+        return
+
+    ordered = AGG_ORDER + [a for a in by_agg if a not in AGG_ORDER]
+    for agg in ordered:
+        fails = by_agg.get(agg, [])
+        if not fails:
+            print(f"\n{agg}: clean — no failed cells")
+            continue
+        counts: dict[str, int] = defaultdict(int)
+        for _, cat, _, _ in fails:
+            counts[cat] += 1
+        summary = ", ".join(f"{n} {cat}" for cat, n in sorted(counts.items()))
+        print(f"\n{agg}: {len(fails)} failed cell(s) — {summary}")
+        for cell_id, cat, reason, source in sorted(fails):
+            print(f"    [{cat:8s}] {cell_id}")
+            print(f"               {reason}  [{source}]")
+    print("=" * 64)
+
+
+# ---------------------------------------------------------------------------
 # Summary table
 # ---------------------------------------------------------------------------
 
@@ -546,35 +657,12 @@ def main():
         sys.exit(1)
 
     # ------------------------------------------------------------------
-    # Crashed cells — show before anything else so errors are visible
+    # Per-aggregator failure report — shown first so problems are visible.
+    # Catches recorded crashes AND inferred failures (diverged / no-eval /
+    # short), including legacy JSONs written before error-saving existed.
     # ------------------------------------------------------------------
-    crashed = [c for c in cells if c.get("status") == "crashed"]
-    if crashed:
-        print(f"\n{'='*64}")
-        print(f"CRASHED CELLS  ({len(crashed)} cells failed with a recorded exception)")
-        print(f"{'='*64}")
-        for c in crashed:
-            err = c.get("error") or {}
-            oom_tag = "  [CUDA OOM]" if err.get("oom") else ""
-            print(
-                f"  {c['cell_id']}\n"
-                f"    failed_at_step={err.get('failed_at_step', '?')}  "
-                f"error={err.get('type', '?')}: {err.get('message', '')[:120]}"
-                f"{oom_tag}"
-            )
-        print(f"{'='*64}")
-    else:
-        print("[analyze] No crashed cells (status=crashed) found.")
-
-    # Flag cells with fewer steps than expected (interrupted or in-progress)
     max_steps = max(c["n_steps"] for c in cells)
-    incomplete = [c for c in cells if c["n_steps"] < max_steps and c["n_steps"] > 0
-                  and c.get("status") != "crashed"]
-    if incomplete:
-        print(f"[analyze] NOTE: {len(incomplete)} cells have fewer than {max_steps} steps "
-              f"(may be in-progress or interrupted):")
-        for c in incomplete:
-            print(f"  {c['cell_id']}  n_steps={c['n_steps']}  status={c.get('status','?')}")
+    failure_report(cells, expected_steps=max_steps)
 
     # ------------------------------------------------------------------
     # Coverage report
