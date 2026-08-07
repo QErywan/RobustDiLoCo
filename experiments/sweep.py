@@ -18,10 +18,10 @@ Purpose:      Establish aggregator ranking across all perturbation × f conditio
 
 Tier-2 (validation, expensive)
 --------------------------------
-Model:        ~134M (hparams/sim/sim_model_hparams_full.json)
+Model:        124M GPT-2 (hparams/sim/sim_model_hparams_nanogpt.json, vocab 50257)
 seq_len:      1024
-outer_steps:  150
-Seeds:        3 seeds per cell
+outer_steps:  150 (default; use --outer-steps 50 for the minimal-budget run)
+Seeds:        3 on the headline cell, 1 on supporting decisive cells
 Purpose:      Validate Tier-1 ranking at the committed report scale; produce
               headline perplexity + clean downstream evaluation metrics.
               Subset chosen after Tier-1 analysis — decisive cells only.
@@ -218,8 +218,11 @@ def _tier2_cells() -> list[Cell]:
 # ---------------------------------------------------------------------------
 
 TIER_HPARAMS = {
-    1: "hparams/sim/sim_model_hparams_gpt2_small.json",
-    2: "hparams/sim/sim_model_hparams_full.json",
+    1: "hparams/sim/sim_model_hparams_gpt2_small.json",   # 30M GPT-2, vocab 50257
+    # Tier-2 must be a GPT-2 (vocab 50257) to match the gpt2-tokenized C4 shards and
+    # Tier-1; the old full.json is LLaMA (vocab 32000) and would device-assert on the
+    # data. nanogpt = 124M GPT-2, the model the pseudo-grad analysis also used.
+    2: "hparams/sim/sim_model_hparams_nanogpt.json",      # 124M GPT-2, vocab 50257
 }
 
 TIER_OUTER_STEPS = {
