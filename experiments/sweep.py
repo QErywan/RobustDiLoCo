@@ -164,51 +164,44 @@ def _tier2_cells() -> list[Cell]:
     Tier-2 validation cells — the DECISIVE conditions from the Tier-1 analysis.
 
     Tier-2 (134M) exists to show the Tier-1 ranking HOLDS AT SCALE, not to reproduce
-    the whole grid. The cells below are exactly the conditions where aggregators
-    separated in Tier-1, chosen to demonstrate each scientific claim once:
+    the whole grid. Cells cover the three scientific claims once each, so Tier-2
+    validates the full perturbation-DEPENDENT ranking, not just the headline:
 
-      - clean f=0                : sanity — all aggregators converge to ~same loss
-      - magnitude f=2 s=10       : THE headline — mean diverges, robust hold (RFA best)
-      - dropout  f=4             : the perturbation-dependence mirror — RFA is *worst*
-      - magnitude f=4 s=10       : where the robust aggregators separate from each other
+      - clean f=0           : sanity — all aggregators converge to ~same loss
+      - magnitude f=2 s=10  : headline — mean diverges, robust hold (RFA best)
+      - dropout  f=4        : the mirror — RFA is *worst* (perturbation-dependence)
+      - gaussian f=2 s=0.5  : natural perturbation — mean fails without an adversary
 
-    Seeds follow the supervisor's steer ("more seeds on fewer cells"): 3 seeds on the
-    headline magnitude cell (for effect-size error bars), 1 seed on the supporting
-    decisive cells. Krum at f=4 is auto-skipped by the 2f+2>=n guard in run_sweep.
+    Single seed throughout (consistent with Tier-1, which is also single-seed) — the
+    minimal-Tier-2 budget on one L4 does not stretch to seed error bars. Cells are
+    ordered by PRIORITY: clean + magnitude first (the headline scale result, wanted for
+    the report draft), then dropout + gaussian. If a run is cut short, the most
+    important cells are already done. Krum at f=4 is auto-skipped by the 2f+2>=n guard.
 
-    Compute note: run these with `--outer-steps 50` on GCP. 50 steps is enough to show
-    the ranking (Tier-1 used 50); the full 150 is only needed for converged headline
-    perplexity, which is out of the minimal-Tier-2 budget. Optional stretch cells
-    (gaussian f=2 s=1.0; +seeds on dropout f=4) can be appended if compute allows.
+    Compute: 19 cells after the guard. Pilot measured ~2200s/outer-step at 124M/batch-4
+    on an L4, so at TIER_OUTER_STEPS[2]=25 each cell is ~15h (~$13 on-demand); the set
+    is ~$250 / ~12 days serial on one GPU. Run with --batch-size 4 (batch 8 OOMs the
+    24GB L4 on the seq-1024 attention tensor) and
+    PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True.
     """
     cells = []
-    headline_seeds = [42, 1, 2]   # 3 seeds on the headline for error bars
-    SINGLE = 42                    # 1 seed for sanity + supporting decisive cells
+    SEED = 42   # single seed throughout (matches Tier-1)
 
-    # 1. Clean baseline (sanity at 134M) — all aggregators, 1 seed.
+    # 1. Clean baseline (sanity at 134M) — all 5 aggregators.
     for agg in AGGREGATORS:
-        cells.append(Cell(agg, "none", 0, 0.0, SINGLE, 2))
+        cells.append(Cell(agg, "none", 0, 0.0, SEED, 2))
 
-    # 2. HEADLINE — magnitude attack f=2 s=10: mean diverges, robust hold. 3 seeds.
+    # 2. HEADLINE — magnitude f=2 s=10: mean diverges, robust hold (RFA best).
     for agg in AGGREGATORS:
-        for seed in headline_seeds:
-            cells.append(Cell(agg, "magnitude", 2, 10.0, seed, 2))
+        cells.append(Cell(agg, "magnitude", 2, 10.0, SEED, 2))
 
-    # 3. Dropout f=4 — perturbation-dependence mirror (RFA worst). 1 seed.
-    #    (krum auto-skipped: undefined at f=4)
+    # 3. Dropout f=4 — the mirror: RFA *worst* (krum auto-skipped, undefined at f=4).
     for agg in AGGREGATORS:
-        cells.append(Cell(agg, "dropout", 4, 0.0, SINGLE, 2))
+        cells.append(Cell(agg, "dropout", 4, 0.0, SEED, 2))
 
-    # 4. Magnitude f=4 s=10 — robust-vs-robust separation. 1 seed. (krum auto-skipped)
+    # 4. Gaussian f=2 s=0.5 — natural perturbation: mean fails without an adversary.
     for agg in AGGREGATORS:
-        cells.append(Cell(agg, "magnitude", 4, 10.0, SINGLE, 2))
-
-    # --- optional stretch (uncomment if the timed pilot shows budget headroom) ---
-    # for agg in AGGREGATORS:                                   # gaussian natural pert.
-    #     cells.append(Cell(agg, "gaussian", 2, 1.0, SINGLE, 2))
-    # for agg in AGGREGATORS:                                   # +2 seeds on the mirror
-    #     for seed in [1, 2]:
-    #         cells.append(Cell(agg, "dropout", 4, 0.0, seed, 2))
+        cells.append(Cell(agg, "gaussian", 2, 0.5, SEED, 2))
 
     return cells
 
@@ -227,7 +220,8 @@ TIER_HPARAMS = {
 
 TIER_OUTER_STEPS = {
     1: 50,
-    2: 150,
+    2: 25,   # minimal-Tier-2: 25 steps shows the ranking (Tier-1 diverged by ~5-30);
+             # the full 150 is only for converged perplexity, out of the 1-GPU budget.
 }
 
 TIER_BATCH_SIZE = {
