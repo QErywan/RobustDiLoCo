@@ -159,7 +159,7 @@ def _tier1_cells(seed: int = PRIMARY_SEED) -> list[Cell]:
     return cells
 
 
-def _tier2_cells() -> list[Cell]:
+def _tier2_cells(seed: int = PRIMARY_SEED) -> list[Cell]:
     """
     Tier-2 validation cells — the DECISIVE conditions from the Tier-1 analysis.
 
@@ -185,7 +185,7 @@ def _tier2_cells() -> list[Cell]:
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True.
     """
     cells = []
-    SEED = 42   # single seed throughout (matches Tier-1)
+    SEED = seed   # single seed throughout (matches Tier-1); --seed overrides for a 2nd seed
 
     # 1. Clean baseline (sanity at 134M) — all 5 aggregators.
     for agg in AGGREGATORS:
@@ -273,7 +273,10 @@ def build_command(cell: Cell, args: argparse.Namespace) -> list[str]:
 
 
 def run_sweep(args: argparse.Namespace) -> None:
-    cells = _tier1_cells() if args.tier == 1 else _tier2_cells()
+    if args.seed is not None:
+        cells = _tier1_cells(args.seed) if args.tier == 1 else _tier2_cells(args.seed)
+    else:
+        cells = _tier1_cells() if args.tier == 1 else _tier2_cells()
 
     # Filter by aggregator if requested
     if args.only_aggregator:
@@ -372,6 +375,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--only-aggregator", type=str, default=None,
                    choices=["mean", "trimmed", "median", "rfa", "krum"],
                    help="Run only cells for this aggregator (debugging / partial sweep)")
+    p.add_argument("--seed", type=int, default=None,
+                   help="Override the per-cell seed (default 42). Use a different value "
+                        "(e.g. 43) to run a second seed on separate hardware without "
+                        "colliding with the seed42 result files.")
 
     # Overrides (defaults from TIER_* dicts above)
     p.add_argument("--hparams",       type=str, default=None,
