@@ -134,7 +134,8 @@ def build_aggregator(name: str, f: int, n_workers: int):
         raise ValueError(f"Unknown aggregator: {name!r}. Choose from {AGGREGATOR_CHOICES}")
 
 
-def build_perturbation(name: str, f: int, severity: float, n_workers: int):
+def build_perturbation(name: str, f: int, severity: float, n_workers: int,
+                       dropout_mode: str = "zero"):
     """
     Map perturbation name to a Perturbation object.
 
@@ -156,7 +157,7 @@ def build_perturbation(name: str, f: int, severity: float, n_workers: int):
         # hook is a pass-through here — no Byzantine worker (f=0).
         return NoPerturbation()
     elif name == "dropout":
-        return WorkerDropout(n_workers=n_workers, f=f)
+        return WorkerDropout(n_workers=n_workers, f=f, mode=dropout_mode)
     elif name == "gaussian":
         return GaussianNoise(n_workers=n_workers, f=f, sigma_scale=severity)
     elif name == "magnitude":
@@ -167,10 +168,15 @@ def build_perturbation(name: str, f: int, severity: float, n_workers: int):
 
 def cell_id(args) -> str:
     """Stable string ID for this experiment cell — used in filenames."""
+    # Only exclude-mode dropout gets a tag, so existing zero-mode result filenames
+    # are unchanged (--resume keeps finding them); zero vs exclude never collide.
+    mode_tag = "_excl" if (args.perturbation == "dropout"
+                           and args.dropout_mode == "exclude") else ""
     return (
         f"{args.aggregator}"
         f"_p{args.perturbation}"
         f"_f{args.byzantine_f}"
+        f"{mode_tag}"
         f"_s{args.severity}"
         f"_seed{args.seed}"
     )
@@ -282,6 +288,14 @@ def parse_args():
                        "(thesis: 0.1, 0.5, 1.0), scale for magnitude "
                        "(thesis: 10, 100, 1000), ignored for dropout/none"
                    ))
+    p.add_argument("--dropout-mode",  type=str, default="zero",
+                   choices=["zero", "exclude"],
+                   help=(
+                       "How a dropped worker is modelled (dropout perturbation only): "
+                       "'zero' replaces its pseudo-grad with the origin (aggregator sees "
+                       "n vectors); 'exclude' removes it (aggregator sees n-f survivors, "
+                       "as FedAvg handles a non-responding client)."
+                   ))
 
     # Reproducibility
     p.add_argument("--seed", type=int, default=42,
@@ -392,6 +406,7 @@ def run(args):
         f=args.byzantine_f,
         severity=args.severity,
         n_workers=cfg["n_workers"],
+        dropout_mode=args.dropout_mode,
     )
 
     # Workers
@@ -436,6 +451,7 @@ def run(args):
         "aggregator":   args.aggregator,
         "perturbation": args.perturbation,
         "byzantine_f":  args.byzantine_f,
+        "dropout_mode": args.dropout_mode,
         "severity":     args.severity,
         "seed":         args.seed,
         "dataset":      args.dataset,

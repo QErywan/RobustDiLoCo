@@ -65,13 +65,19 @@ class Cell(NamedTuple):
     severity:     float
     seed:         int
     tier:         int
+    dropout_mode: str = "zero"   # dropout only: "zero" or "exclude"
 
     @property
     def cell_id(self) -> str:
+        # Only exclude-mode dropout is tagged, so zero-mode filenames are unchanged
+        # and zero vs exclude never collide under --resume.
+        mode_tag = "_excl" if (self.perturbation == "dropout"
+                               and self.dropout_mode == "exclude") else ""
         return (
             f"{self.aggregator}"
             f"_p{self.perturbation}"
             f"_f{self.byzantine_f}"
+            f"{mode_tag}"
             f"_s{self.severity}"
             f"_seed{self.seed}"
         )
@@ -206,6 +212,26 @@ def _tier2_cells(seed: int = PRIMARY_SEED) -> list[Cell]:
     return cells
 
 
+def _dropout_comparison_cells(seed: int = PRIMARY_SEED, tier: int = 1) -> list[Cell]:
+    """
+    The dropout zeroing-vs-exclusion comparison.
+
+    At f=4 a dropped worker modelled as a zero vector sits at the origin; with four of
+    eight inputs there, the geometric median returns the origin and RFA collapses. Under
+    exclusion (the survivors only) it does not. Running both models settles whether the
+    "RFA worst under dropout" result is real or an artefact of the zeroing choice.
+
+    f=4, the four f-relevant aggregators, both models = 8 cells. Krum is skipped at f=4
+    by the 2f+2>=n guard, and mean/median/RFA ignore f, so exclusion is well-defined for
+    all four (trimmed caps its trim width to the survivor count).
+    """
+    cells = []
+    for agg in ["mean", "trimmed", "median", "rfa"]:
+        for mode in ("zero", "exclude"):
+            cells.append(Cell(agg, "dropout", 4, 0.0, seed, tier, mode))
+    return cells
+
+
 # ---------------------------------------------------------------------------
 # Tier-specific hparams
 # ---------------------------------------------------------------------------
@@ -253,6 +279,7 @@ def build_command(cell: Cell, args: argparse.Namespace) -> list[str]:
         "--aggregator",    cell.aggregator,
         "--perturbation",  cell.perturbation,
         "--byzantine-f",   str(cell.byzantine_f),
+        "--dropout-mode",  cell.dropout_mode,
         "--severity",      str(cell.severity),
         "--seed",          str(cell.seed),
         "--device",        args.device,
@@ -273,7 +300,10 @@ def build_command(cell: Cell, args: argparse.Namespace) -> list[str]:
 
 
 def run_sweep(args: argparse.Namespace) -> None:
-    if args.seed is not None:
+    if args.dropout_compare:
+        seed = args.seed if args.seed is not None else PRIMARY_SEED
+        cells = _dropout_comparison_cells(seed=seed, tier=args.tier)
+    elif args.seed is not None:
         cells = _tier1_cells(args.seed) if args.tier == 1 else _tier2_cells(args.seed)
     else:
         cells = _tier1_cells() if args.tier == 1 else _tier2_cells()
@@ -379,6 +409,10 @@ def parse_args() -> argparse.Namespace:
                    help="Override the per-cell seed (default 42). Use a different value "
                         "(e.g. 43) to run a second seed on separate hardware without "
                         "colliding with the seed42 result files.")
+    p.add_argument("--dropout-compare", action="store_true",
+                   help="Run only the dropout zeroing-vs-exclusion comparison: f=4, the "
+                        "four f-relevant aggregators, both models (8 cells). Overrides "
+                        "the tier grid.")
 
     # Overrides (defaults from TIER_* dicts above)
     p.add_argument("--hparams",       type=str, default=None,

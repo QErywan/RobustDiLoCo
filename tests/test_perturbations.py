@@ -87,6 +87,41 @@ class TestWorkerDropout:
         for orig, after in zip(originals, grads):
             assert torch.allclose(orig, after)
 
+    def test_exclude_mode_returns_survivors_only(self):
+        p = WorkerDropout(n_workers=N, f=4, mode="exclude")
+        out = p.apply(_randn_grads())
+        assert len(out) == N - 4
+
+    def test_exclude_mode_survivors_are_honest(self):
+        p = WorkerDropout(n_workers=N, f=4, mode="exclude")
+        grads = _randn_grads()
+        out = p.apply(grads)
+        for i in range(N - 4):
+            assert torch.allclose(out[i], grads[i])
+
+    def test_invalid_mode_raises(self):
+        with pytest.raises(ValueError):
+            WorkerDropout(n_workers=N, f=2, mode="drop")
+
+    def test_exclude_output_consumed_by_all_aggregators(self):
+        # The whole point of exclusion: the aggregator gets n-f vectors and must not
+        # error. trimmed's trim width must adapt to the shortened input.
+        from simulation.aggregators import (
+            MeanAggregator, TrimmedMeanAggregator,
+            CoordMedianAggregator, GeometricMedianAggregator,
+        )
+        survivors = WorkerDropout(n_workers=N, f=4, mode="exclude").apply(_randn_grads())
+        aggs = [
+            MeanAggregator(),
+            TrimmedMeanAggregator(f=4, n_workers=N),
+            CoordMedianAggregator(),
+            GeometricMedianAggregator(),
+        ]
+        for agg in aggs:
+            out = agg.aggregate(survivors)
+            assert out.shape == (D,)
+            assert torch.isfinite(out).all()
+
 
 # ---------------------------------------------------------------------------
 # GaussianNoise

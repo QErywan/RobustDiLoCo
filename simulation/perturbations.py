@@ -27,24 +27,44 @@ class NoPerturbation:
 
 class WorkerDropout:
     """
-    Simulate straggler / dropped workers by replacing f workers' pseudo-
-    gradients with zeros. Corresponds to those workers failing to communicate.
+    Simulate straggler / dropped workers. Two models of a dropped worker, selected
+    by `mode`:
 
-    This is a natural perturbation (not adversarial) — the aggregator receives
-    fewer informative updates. Severity levels in the thesis: f ∈ {1, 2, 4}.
+      - "zero"    (default): replace the f dropped workers' pseudo-gradients with zero
+                  vectors. The aggregator still receives n vectors, f of them at the
+                  origin. This is the original model.
+      - "exclude": remove the f dropped workers entirely; the aggregator receives only
+                  the n-f surviving vectors. This is how FedAvg and real federated
+                  systems handle a non-responding client.
 
-    Note: designed for per-step SGD dropout analysis (Blanchard et al., 2017),
-    but used here as a natural fault model. No published theoretical guarantee
-    for the H=500 pseudo-gradient regime.
+    The distinction is not cosmetic: a geometric median (RFA) with half its inputs
+    zeroed at the origin returns the origin, which manufactured the apparent "RFA is
+    worst under dropout" reversal; under exclusion RFA is unaffected. Running both
+    models is itself the finding (the modelling choice determines the verdict). See
+    the 2026-08-20 supervisor brief.
+
+    This is a natural perturbation (not adversarial) — the aggregator receives fewer
+    informative updates. Severity levels in the thesis: f ∈ {1, 2, 4}.
+
+    Note: designed for per-step SGD dropout analysis (Blanchard et al., 2017), but used
+    here as a natural fault model. No published theoretical guarantee for the H=500
+    pseudo-gradient regime.
     """
 
-    def __init__(self, n_workers: int, f: int):
+    def __init__(self, n_workers: int, f: int, mode: str = "zero"):
         if f >= n_workers:
             raise ValueError(f"f={f} must be < n_workers={n_workers}")
+        if mode not in ("zero", "exclude"):
+            raise ValueError(f"mode must be 'zero' or 'exclude', got {mode!r}")
         self.n_workers = n_workers
         self.f = f
+        self.mode = mode
 
     def apply(self, pseudo_grads: list[Tensor]) -> list[Tensor]:
+        if self.mode == "exclude":
+            # Drop the last f workers outright — the aggregator sees n-f survivors.
+            return list(pseudo_grads[: self.n_workers - self.f])
+        # "zero": keep n vectors, put the last f at the origin.
         result = list(pseudo_grads)
         for i in range(self.n_workers - self.f, self.n_workers):
             result[i] = torch.zeros_like(pseudo_grads[i])

@@ -96,7 +96,13 @@ class TrimmedMeanAggregator:
         stacked = torch.stack(pseudo_grads)            # (n, d)
         n = stacked.shape[0]
         sorted_grads, _ = stacked.sort(dim=0)          # sort along worker axis
-        trimmed = sorted_grads[self.f : n - self.f]    # (n-2f, d)
+        # Cap the trim width to what THIS input length supports. Under worker-dropout
+        # exclusion the aggregator receives n-f < n_workers survivors, and a trim width
+        # derived from the full n would over-trim (empty slice). This is a no-op under
+        # zeroing (n stays at n_workers, cap stays at self.f) so it cannot change any
+        # existing result; it only makes a shortened input well-defined.
+        f_eff = min(self.f, max(0, n // 2 - 1))
+        trimmed = sorted_grads[f_eff : n - f_eff]      # (n-2*f_eff, d)
         return trimmed.mean(dim=0)
 
 
