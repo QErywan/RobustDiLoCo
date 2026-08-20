@@ -37,18 +37,13 @@ class WorkerDropout:
                   the n-f surviving vectors. This is how FedAvg and real federated
                   systems handle a non-responding client.
 
-    The distinction is not cosmetic: a geometric median (RFA) with half its inputs
-    zeroed at the origin returns the origin, which manufactured the apparent "RFA is
-    worst under dropout" reversal; under exclusion RFA is unaffected. Running both
-    models is itself the finding (the modelling choice determines the verdict). See
-    the 2026-08-20 supervisor brief.
+    At f=4 the zeroing model puts half the inputs at the origin, where a geometric
+    median (RFA) collapses; exclusion leaves it unaffected. Running both distinguishes
+    a real effect from an artefact of the zeroing choice.
 
-    This is a natural perturbation (not adversarial) — the aggregator receives fewer
-    informative updates. Severity levels in the thesis: f ∈ {1, 2, 4}.
-
-    Note: designed for per-step SGD dropout analysis (Blanchard et al., 2017), but used
-    here as a natural fault model. No published theoretical guarantee for the H=500
-    pseudo-gradient regime.
+    Natural (non-adversarial) perturbation; the aggregator receives fewer informative
+    updates. Thesis severity levels: f in {1, 2, 4}. Designed for per-step SGD dropout
+    (Blanchard et al., 2017) and applied here at H=500 without a published guarantee.
     """
 
     def __init__(self, n_workers: int, f: int, mode: str = "zero"):

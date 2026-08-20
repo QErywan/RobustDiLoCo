@@ -152,12 +152,9 @@ def _tier1_cells(seed: int = PRIMARY_SEED) -> list[Cell]:
         for f in DROPOUT_F_VALUES:
             cells.append(Cell(agg, "dropout", f, 0.0, seed, 1))
 
-    # 5. Heterogeneous data — Dirichlet α ∈ {0.1, 0.5, 1.0}, no Byzantine workers
-    #    NOTE: hetero is a data-level perturbation implemented via the dataset loader,
-    #    not via the perturbations.py hook.  The runner handles this via --perturbation
-    #    hetero (TODO: implement in run_experiment.py once data.py has HeterogeneousData).
-    #    Cells are listed here for completeness; they will be skipped in run_sweep
-    #    and flagged as pending until the loader is ready.
+    # 5. Heterogeneous data — Dirichlet alpha in {0.1, 0.5, 1.0}, no Byzantine workers.
+    #    Applied at the dataset-loader level, not through the perturbations.py hook;
+    #    the runner routes it via --perturbation hetero (see simulation/hetero_data.py).
     for agg in AGGREGATORS:
         for alpha in HETERO_ALPHAS:
             cells.append(Cell(agg, "hetero", 0, alpha, seed, 1))
@@ -214,16 +211,10 @@ def _tier2_cells(seed: int = PRIMARY_SEED) -> list[Cell]:
 
 def _dropout_comparison_cells(seed: int = PRIMARY_SEED, tier: int = 1) -> list[Cell]:
     """
-    The dropout zeroing-vs-exclusion comparison.
-
-    At f=4 a dropped worker modelled as a zero vector sits at the origin; with four of
-    eight inputs there, the geometric median returns the origin and RFA collapses. Under
-    exclusion (the survivors only) it does not. Running both models settles whether the
-    "RFA worst under dropout" result is real or an artefact of the zeroing choice.
-
-    f=4, the four f-relevant aggregators, both models = 8 cells. Krum is skipped at f=4
-    by the 2f+2>=n guard, and mean/median/RFA ignore f, so exclusion is well-defined for
-    all four (trimmed caps its trim width to the survivor count).
+    The dropout zeroing-vs-exclusion comparison: f=4, the four f-relevant aggregators,
+    both models (8 cells). Krum is skipped at f=4 by the guard; mean/median/RFA ignore f
+    and trimmed caps its trim width to the survivor count, so exclusion is well-defined
+    for all four. See WorkerDropout for why the two models can disagree.
     """
     cells = []
     for agg in ["mean", "trimmed", "median", "rfa"]:
