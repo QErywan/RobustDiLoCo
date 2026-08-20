@@ -303,6 +303,10 @@ def run_sweep(args: argparse.Namespace) -> None:
     if args.only_aggregator:
         cells = [c for c in cells if c.aggregator == args.only_aggregator]
 
+    # Filter by perturbation if requested (e.g. run only the hetero row)
+    if args.only_perturbation:
+        cells = [c for c in cells if c.perturbation == args.only_perturbation]
+
     # Multi-Krum is mathematically undefined when 2f+2 >= n (it needs 2f+2 < n to have
     # enough non-Byzantine neighbours to score). At n=8 that rules out f=4. These cells
     # can't be computed — attempting them only wastes compute (they OOM). Skip them here
@@ -393,6 +397,9 @@ def parse_args() -> argparse.Namespace:
                    help="Which experiment tier to run (1=comparative grid, 2=validation)")
     p.add_argument("--dry-run", action="store_true",
                    help="Print the cell list without running anything")
+    p.add_argument("--only-perturbation", type=str, default=None,
+                   choices=["none", "dropout", "gaussian", "magnitude", "hetero"],
+                   help="Run only cells for this perturbation (e.g. hetero row only)")
     p.add_argument("--only-aggregator", type=str, default=None,
                    choices=["mean", "trimmed", "median", "rfa", "krum"],
                    help="Run only cells for this aggregator (debugging / partial sweep)")
