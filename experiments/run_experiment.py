@@ -589,6 +589,15 @@ def run(args):
         )
     print(f"\nResults saved to {out_path}")
 
+    # A completed cell never needs its resume checkpoint. Delete it so checkpoints
+    # (~15 GB each at 124M) don't accumulate one-per-cell and fill the disk mid-sweep.
+    if ckpt_path.exists():
+        try:
+            ckpt_path.unlink()
+            print(f"Removed checkpoint {ckpt_path}")
+        except OSError as e:
+            print(f"[warn] could not remove checkpoint {ckpt_path}: {e}", file=sys.stderr)
+
     return history
 
 
