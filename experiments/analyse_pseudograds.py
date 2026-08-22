@@ -44,7 +44,7 @@ from simulation.aggregators import (
     GeometricMedianAggregator, MultiKrumAggregator,
 )
 from simulation.model import build_model, param_count
-from simulation.perturbations import MagnitudeAttack
+from simulation.perturbations import MagnitudeAttack, GaussianNoise, WorkerDropout
 from simulation.workers import SimConfig, Worker
 
 
@@ -53,9 +53,36 @@ from simulation.workers import SimConfig, Worker
 # ---------------------------------------------------------------------------
 
 N_WORKERS = 8
-BYZANTINE_F = 2
-ATTACK_SCALE = 10.0
+# Defaults reproduce the original W2 run (magnitude f=2 scale=10); all three are now
+# CLI-overridable so the geometry figures can be produced for the other perturbations
+# the supervisor asked for (magnitude f=4, gaussian σ=1.0, dropout f=4). Hetero is a
+# data-level perturbation (f=0, no gradient hook) and is intentionally out of scope here.
+DEFAULT_BYZANTINE_F = 2
+DEFAULT_SEVERITY = 10.0
 PCA_STEPS = {1, 10, 25, 50}
+
+
+def build_geometry_perturbation(name: str, f: int, severity: float, n_workers: int):
+    """
+    Map a perturbation name to a Perturbation object + a human-readable label for
+    figure titles. Only the three gradient-hook perturbations are supported here.
+
+    Returns (perturbation, label). `severity` means scale for magnitude, sigma_scale
+    for gaussian, and is ignored for dropout.
+    """
+    if name == "magnitude":
+        return MagnitudeAttack(n_workers=n_workers, f=f, scale=severity), \
+            f"MagnitudeAttack f={f} scale={severity:g}"
+    if name == "gaussian":
+        return GaussianNoise(n_workers=n_workers, f=f, sigma_scale=severity), \
+            f"GaussianNoise f={f} sigma_scale={severity:g}"
+    if name == "dropout":
+        return WorkerDropout(n_workers=n_workers, f=f), \
+            f"WorkerDropout f={f} (zeroing)"
+    raise ValueError(
+        f"Unsupported perturbation {name!r} for geometry analysis. "
+        f"Choose from: magnitude, gaussian, dropout (hetero is data-level, out of scope)."
+    )
 
 AGGREGATOR_COLORS = {
     "mean": "black",
@@ -65,13 +92,22 @@ AGGREGATOR_COLORS = {
     "krum": "firebrick",
 }
 
-AGGREGATORS = {
-    "mean":    lambda: MeanAggregator(),
-    "trimmed": lambda: TrimmedMeanAggregator(f=BYZANTINE_F, n_workers=N_WORKERS),
-    "median":  lambda: CoordMedianAggregator(),
-    "rfa":     lambda: GeometricMedianAggregator(),
-    "krum":    lambda: MultiKrumAggregator(f=BYZANTINE_F, n_workers=N_WORKERS),
-}
+AGGREGATOR_NAMES = ["mean", "trimmed", "median", "rfa", "krum"]
+
+
+def build_aggregator(name: str, f: int, n_workers: int = N_WORKERS):
+    """Construct an aggregator by name, parameterised by the runtime Byzantine f."""
+    if name == "mean":
+        return MeanAggregator()
+    if name == "trimmed":
+        return TrimmedMeanAggregator(f=f, n_workers=n_workers)
+    if name == "median":
+        return CoordMedianAggregator()
+    if name == "rfa":
+        return GeometricMedianAggregator()
+    if name == "krum":
+        return MultiKrumAggregator(f=f, n_workers=n_workers)
+    raise ValueError(f"Unknown aggregator {name!r}; choose from {AGGREGATOR_NAMES}")
 
 SMOKE_CFG = dict(
     hparams="hparams/sim/sim_model_hparams.json",
@@ -155,9 +191,10 @@ def make_loaders(
 # Plotting
 # ---------------------------------------------------------------------------
 
-def plot_norms(all_metrics: dict[str, list[dict]], out_dir: Path) -> None:
+def plot_norms(all_metrics: dict[str, list[dict]], out_dir: Path,
+               byzantine_f: int, pert_label: str) -> None:
     """Figure 1: 1×5 subplots of per-worker norm trajectories."""
-    n_honest = N_WORKERS - BYZANTINE_F
+    n_honest = N_WORKERS - byzantine_f
     n_aggs = len(all_metrics)
     fig, axes = plt.subplots(1, n_aggs, figsize=(4 * n_aggs, 4), sharey=True)
 
@@ -178,17 +215,18 @@ def plot_norms(all_metrics: dict[str, list[dict]], out_dir: Path) -> None:
     handles = [
         Line2D([0], [0], color="steelblue", label=f"honest workers (n={n_honest})"),
         Line2D([0], [0], color="firebrick", linestyle="--",
-               label=f"Byzantine workers (f={BYZANTINE_F}, scale={ATTACK_SCALE})"),
+               label=f"Byzantine/affected workers (f={byzantine_f})"),
     ]
     axes[0].legend(handles=handles, fontsize=8)
-    fig.suptitle("Per-worker pseudo-gradient norms — MagnitudeAttack f=2 scale=10", y=1.02)
+    fig.suptitle(f"Per-worker pseudo-gradient norms — {pert_label}", y=1.02)
     fig.tight_layout()
     (out_dir / "plots").mkdir(parents=True, exist_ok=True)
     fig.savefig(out_dir / "plots" / "fig1_norms.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_cohesion_oracle(all_metrics: dict[str, list[dict]], out_dir: Path) -> None:
+def plot_cohesion_oracle(all_metrics: dict[str, list[dict]], out_dir: Path,
+                         byzantine_f: int, pert_label: str) -> None:
     """Figure 2: honest cohesion (top) + cosine-to-oracle (bottom)."""
     (out_dir / "plots").mkdir(parents=True, exist_ok=True)
     fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
@@ -225,7 +263,7 @@ def plot_cohesion_oracle(all_metrics: dict[str, list[dict]], out_dir: Path) -> N
     ax_bot.set_xlabel("outer step")
     ax_bot.set_ylabel("cosine similarity to oracle honest mean")
     ax_bot.set_title(
-        "Aggregator recovery of the honest signal\n"
+        f"Aggregator recovery of the honest signal — {pert_label}\n"
         "(cosine between aggregate and oracle = mean of honest pseudo-grads)"
     )
     ax_bot.legend(fontsize=9)
@@ -240,6 +278,8 @@ def plot_cohesion_oracle(all_metrics: dict[str, list[dict]], out_dir: Path) -> N
 def plot_pca_snapshots(
     all_metrics: dict[str, list[dict]],
     out_dir: Path,
+    byzantine_f: int,
+    pert_label: str,
     steps: list[int] | None = None,
 ) -> None:
     """Figure 3: 5×2 PCA scatter (one row per aggregator, columns = step 1 and step 25)."""
@@ -247,7 +287,7 @@ def plot_pca_snapshots(
     if steps is None:
         steps = [1, 25]
     agg_names = list(all_metrics.keys())
-    n_honest = N_WORKERS - BYZANTINE_F
+    n_honest = N_WORKERS - byzantine_f
 
     fig, axes = plt.subplots(len(agg_names), len(steps), figsize=(5 * len(steps), 4 * len(agg_names)))
     if len(agg_names) == 1:
@@ -297,8 +337,8 @@ def plot_pca_snapshots(
                 ax.legend(fontsize=7, loc="best")
 
     fig.suptitle(
-        "2D PCA of pseudo-gradients — MagnitudeAttack f=2 scale=10\n"
-        "Blue=honest, Red=Byzantine, Green★=oracle, Diamond=aggregated",
+        f"2D PCA of pseudo-gradients — {pert_label}\n"
+        "Blue=honest, Red=Byzantine/affected, Green★=oracle, Diamond=aggregated",
         fontsize=11, y=1.01,
     )
     fig.tight_layout()
@@ -306,10 +346,10 @@ def plot_pca_snapshots(
     plt.close(fig)
 
 
-def plot_all(out_dir: Path) -> None:
+def plot_all(out_dir: Path, byzantine_f: int, pert_label: str) -> None:
     """Load all metrics files and produce all three figures."""
     all_metrics: dict[str, list[dict]] = {}
-    for agg_name in AGGREGATORS:
+    for agg_name in AGGREGATOR_NAMES:
         path = out_dir / f"metrics_{agg_name}.json"
         if not path.exists():
             continue
@@ -317,13 +357,13 @@ def plot_all(out_dir: Path) -> None:
             all_metrics[agg_name] = json.load(f)
 
     print("Plotting fig1_norms.png …")
-    plot_norms(all_metrics, out_dir)
+    plot_norms(all_metrics, out_dir, byzantine_f, pert_label)
 
     print("Plotting fig2_cohesion_oracle.png …")
-    plot_cohesion_oracle(all_metrics, out_dir)
+    plot_cohesion_oracle(all_metrics, out_dir, byzantine_f, pert_label)
 
     print("Plotting fig3_pca_snapshots.png …")
-    plot_pca_snapshots(all_metrics, out_dir)
+    plot_pca_snapshots(all_metrics, out_dir, byzantine_f, pert_label)
 
     print(f"Figures saved to {out_dir}/plots/")
 
@@ -341,31 +381,56 @@ def parse_args():
                    help="Path to pre-tokenized .npy shards (omit for synthetic fallback)")
     p.add_argument("--offload", action="store_true",
                    help="Page workers on/off device one at a time to reduce peak VRAM")
-    p.add_argument("--out-dir", default="experiments/results/analysis/pseudograd_magnitude_f2_s10",
-                   help="Output directory for metrics + figures")
-    p.add_argument("--only", nargs="*", choices=list(AGGREGATORS.keys()),
+    p.add_argument("--perturbation", default="magnitude",
+                   choices=["magnitude", "gaussian", "dropout"],
+                   help="Gradient-hook perturbation to instrument. hetero is data-level "
+                        "(f=0, no gradient hook) and is out of scope for this driver.")
+    p.add_argument("--byzantine-f", type=int, default=DEFAULT_BYZANTINE_F,
+                   help="Number of Byzantine/affected workers (the last f). Default 2.")
+    p.add_argument("--severity", type=float, default=DEFAULT_SEVERITY,
+                   help="magnitude → scale (e.g. 10, 100); gaussian → sigma_scale "
+                        "(e.g. 0.5, 1.0); ignored for dropout. Default 10.")
+    p.add_argument("--out-dir", default=None,
+                   help="Output directory for metrics + figures. Default auto-derives "
+                        "from the condition: analysis/pseudograd_<scope>_<pert>_f<f>[_s<sev>]")
+    p.add_argument("--only", nargs="*", choices=AGGREGATOR_NAMES,
                    help="Run only these aggregators (default: all 5)")
     return p.parse_args()
 
 
 def run(args):
     cfg = SMOKE_CFG if args.smoke else FULL_CFG
-    out_dir = Path(args.out_dir)
+    byzantine_f = args.byzantine_f
+    severity = args.severity
+    perturbation, pert_label = build_geometry_perturbation(
+        args.perturbation, f=byzantine_f, severity=severity, n_workers=N_WORKERS,
+    )
+
+    # Auto output dir encodes the condition so different perturbations/f/severity do not
+    # overwrite each other's metrics + figures.
+    if args.out_dir:
+        out_dir = Path(args.out_dir)
+    else:
+        scope = "smoke" if args.smoke else "30m"
+        sev_tag = "" if args.perturbation == "dropout" else f"_s{severity:g}"
+        out_dir = Path(
+            f"experiments/results/analysis/"
+            f"pseudograd_{scope}_{args.perturbation}_f{byzantine_f}{sev_tag}"
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    agg_names = args.only or list(AGGREGATORS.keys())
+    agg_names = args.only or AGGREGATOR_NAMES
     pca_steps = cfg["pca_steps"]
-    perturbation = MagnitudeAttack(n_workers=N_WORKERS, f=BYZANTINE_F, scale=ATTACK_SCALE)
 
     print(f"\n{'='*60}")
     print(f"  Pseudo-gradient analysis — {'SMOKE' if args.smoke else 'FULL'}")
-    print(f"  hparams   : {cfg['hparams']}")
-    print(f"  H         : {cfg['H']}")
-    print(f"  steps     : {cfg['outer_steps']}")
-    print(f"  f         : {BYZANTINE_F}  scale={ATTACK_SCALE}")
-    print(f"  device    : {args.device}")
-    print(f"  pca_steps : {sorted(pca_steps)}")
-    print(f"  out_dir   : {out_dir}")
+    print(f"  hparams     : {cfg['hparams']}")
+    print(f"  H           : {cfg['H']}")
+    print(f"  steps       : {cfg['outer_steps']}")
+    print(f"  perturbation: {pert_label}")
+    print(f"  device      : {args.device}")
+    print(f"  pca_steps   : {sorted(pca_steps)}")
+    print(f"  out_dir     : {out_dir}")
     print(f"{'='*60}\n")
 
     # Build initial model once — all aggregators start from the same weights
@@ -407,11 +472,11 @@ def run(args):
 
         sim = InstrumentedSimulation(
             workers=workers,
-            aggregator=AGGREGATORS[agg_name](),
+            aggregator=build_aggregator(agg_name, byzantine_f, N_WORKERS),
             perturbation=perturbation,
             config=sim_config,
             out_dir=out_dir,
-            byzantine_f=BYZANTINE_F,
+            byzantine_f=byzantine_f,
             pca_steps=pca_steps,
         )
 
@@ -428,7 +493,7 @@ def run(args):
         print(f"  Written: {out_dir}/metrics_{agg_name}.json")
 
     print("\nAll aggregators done. Generating plots …")
-    plot_all(out_dir)
+    plot_all(out_dir, byzantine_f, pert_label)
     print("Done.")
 
 

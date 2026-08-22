@@ -124,6 +124,16 @@ def load_cells(results_dir: str | Path) -> list[dict[str, Any]]:
 
         perplexity = eval_block.get("perplexity") if eval_block else None
 
+        # Divergence-aware summary: a diverged run's final loss is NaN, which makes
+        # final_loss useless exactly on the headline (magnitude/gaussian) conditions.
+        # Also record the last FINITE loss and the step it blew up, so the effect-size
+        # table and summary.csv carry signal instead of NaN. Two divergence signatures
+        # exist and both count: loss/mean → NaN (Tier-1 mean cells) AND loss/mean staying
+        # finite-but-huge while eval perplexity blows up (the Tier-2 headline: loss 87 but
+        # ppl 2e98). The flag fires on either.
+        final_loss_finite, loss_nonfinite, divergence_step = _finite_loss_summary(history)
+        diverged = loss_nonfinite or _is_diverged_ppl(perplexity)
+
         # Determine status — explicit field takes priority; infer for legacy JSONs.
         if "status" in data:
             status = data["status"]
@@ -140,6 +150,9 @@ def load_cells(results_dir: str | Path) -> list[dict[str, Any]]:
             "cell_id":    p.stem,
             "n_steps":    len(history),
             "final_loss": final_loss,
+            "final_loss_finite": final_loss_finite,
+            "diverged":   diverged,
+            "divergence_step": divergence_step,
             "perplexity": perplexity,
             "status":     status,
             "error":      error,
@@ -270,6 +283,33 @@ def failure_report(cells: list[dict], expected_steps: int) -> None:
 # Summary table
 # ---------------------------------------------------------------------------
 
+def _finite_loss_summary(history: list[dict]) -> tuple:
+    """
+    Scan a cell's history for divergence-aware loss metrics.
+
+    Returns (last_finite_loss, diverged, divergence_step):
+      - last_finite_loss: the most recent finite loss/mean (None if none finite).
+        For a diverged run this is the loss just before it blew up — a citable
+        number where final_loss is NaN.
+      - diverged: True if any history entry has a non-finite (or None) loss/mean.
+        A NaN anywhere means the run left the healthy regime and never came back.
+      - divergence_step: outer_step of the FIRST non-finite loss/mean (None if never).
+        This is a cleaner headline than a NaN — "mean diverged at step N".
+    """
+    last_finite = None
+    divergence_step = None
+    saw_nonfinite = False
+    for h in history:
+        v = h.get("loss/mean")
+        if v is not None and math.isfinite(v):
+            last_finite = v
+        else:
+            saw_nonfinite = True
+            if divergence_step is None:
+                divergence_step = h.get("outer_step")
+    return last_finite, saw_nonfinite, divergence_step
+
+
 def final_metrics(cell: dict) -> dict:
     """Extract scalar summary metrics from a loaded cell dict."""
     return {
@@ -282,6 +322,9 @@ def final_metrics(cell: dict) -> dict:
         "n_steps":     cell["n_steps"],
         "status":      cell.get("status", "running"),
         "final_loss":  cell["final_loss"],
+        "final_loss_finite": cell["final_loss_finite"],
+        "diverged":    cell["diverged"],
+        "divergence_step": cell["divergence_step"],
         "perplexity":  cell["perplexity"],
     }
 
@@ -298,7 +341,8 @@ def build_table(cells: list[dict], out_path: Path) -> list[dict]:
                               r["severity"], r["aggregator"]))
 
     fieldnames = ["cell_id", "aggregator", "perturbation", "byzantine_f",
-                  "severity", "seed", "n_steps", "status", "final_loss", "perplexity"]
+                  "severity", "seed", "n_steps", "status", "final_loss",
+                  "final_loss_finite", "diverged", "divergence_step", "perplexity"]
     with open(out_path, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
@@ -361,56 +405,85 @@ def coverage_report(cells: list[dict]) -> None:
 
 def effect_size_table(rows: list[dict]) -> None:
     """
-    Print a table of final_loss[agg] − final_loss[mean] per condition.
+    Print a table of last-finite-loss[agg] − last-finite-loss[mean] per condition.
 
     Negative values = robust aggregator outperforms mean (lower loss).
     This is the wiki's headline metric: pairwise comparison vs. plain mean.
+
+    Uses the last FINITE loss (not the raw final loss), because on the headline
+    magnitude/gaussian conditions the mean — and sometimes the robust rules —
+    diverge to NaN, and a NaN delta carries no signal. A cell that diverged is
+    flagged with "†" and its divergence step is listed below the table, so the
+    comparison stays honest: a finite delta against a diverged cell is a lower
+    bound on the true gap, not a converged number.
     """
     from collections import defaultdict
 
-    # Index: (pert, f, sev) → agg → final_loss
-    index: dict[tuple, dict[str, float | None]] = defaultdict(dict)
+    # Index: (pert, f, sev) → agg → (last_finite_loss, diverged, divergence_step)
+    index: dict[tuple, dict[str, tuple]] = defaultdict(dict)
     for r in rows:
-        if r["final_loss"] is None:
+        if r["final_loss_finite"] is None:
             continue
         key = (r["perturbation"], r["byzantine_f"], r["severity"])
-        index[key][r["aggregator"]] = r["final_loss"]
+        index[key][r["aggregator"]] = (
+            r["final_loss_finite"], r["diverged"], r["divergence_step"]
+        )
 
     robust_aggs = [a for a in AGG_ORDER if a != "mean"]
     header_aggs = ["mean"] + robust_aggs
     col_w = 14
 
     print("\n" + "=" * (32 + col_w * len(header_aggs)))
-    print("EFFECT SIZE TABLE  (final_loss[agg] − final_loss[mean])")
-    print("Negative = robust aggregator outperforms mean")
+    print("EFFECT SIZE TABLE  (last-finite-loss[agg] − last-finite-loss[mean])")
+    print("Negative = robust aggregator outperforms mean   ·   † = cell diverged (NaN in history)")
     print("=" * (32 + col_w * len(header_aggs)))
     header = f"{'Condition':<32}" + "".join(f"{a:>{col_w}}" for a in header_aggs)
     print(header)
     print("-" * len(header))
 
+    diverged_notes: list[str] = []
+
+    def _div_note(cond: str, agg: str, step) -> str:
+        where = f"at step {step}" if step is not None else "in eval (loss stayed finite, ppl blew up)"
+        return f"    {cond:<26} {agg} diverged {where}"
+
     for key in sorted(index):
         pert, f, sev = key
-        losses = index[key]
-        mean_loss = losses.get("mean")
+        cell_vals = index[key]
+        mean_entry = cell_vals.get("mean")
+        mean_loss = mean_entry[0] if mean_entry else None
         cond_str = f"{pert:<10} f={f}  sev={sev:<6.1f}"
 
+        def _fmt(agg: str, val: float, diverged: bool) -> str:
+            s = f"{val:.4f}" if agg == "mean" else f"{val:+.4f}"
+            return (s + "†") if diverged else s
+
         # mean column
-        if mean_loss is not None:
-            mean_str = f"{mean_loss:.4f}"
+        if mean_entry is not None:
+            mean_str = _fmt("mean", mean_loss, mean_entry[1])
+            if mean_entry[1]:
+                diverged_notes.append(_div_note(cond_str.strip(), "mean", mean_entry[2]))
         else:
-            mean_str = "  N/A"
+            mean_str = "N/A"
 
         row_str = f"{cond_str:<32}{mean_str:>{col_w}}"
         for agg in robust_aggs:
-            agg_loss = losses.get(agg)
-            if agg_loss is None or mean_loss is None:
+            entry = cell_vals.get(agg)
+            if entry is None or mean_loss is None:
                 row_str += f"{'N/A':>{col_w}}"
             else:
+                agg_loss, agg_div, agg_div_step = entry
                 delta = agg_loss - mean_loss
-                row_str += f"{delta:>+{col_w}.4f}"
+                row_str += f"{_fmt(agg, delta, agg_div):>{col_w}}"
+                if agg_div:
+                    diverged_notes.append(_div_note(cond_str.strip(), agg, agg_div_step))
         print(row_str)
 
     print("=" * (32 + col_w * len(header_aggs)))
+    if diverged_notes:
+        print("Divergence detail (last-finite value shown above is pre-blow-up):")
+        for note in diverged_notes:
+            print(note)
 
 
 # ---------------------------------------------------------------------------
